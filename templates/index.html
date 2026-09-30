@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Multiplayer Chess</title>
+    <!-- Chessboard.js CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 20px;
+        }
+        #board {
+            width: 400px;
+            margin: 20px 0;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        button, input {
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+        #status {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Python Web Chess</h1>
+
+    <div class="controls">
+        <button onclick="startLocalGame()">Play Local Pass-and-Play</button>
+        <button onclick="createRoom()">Create Remote Room</button>
+    </div>
+
+    <div class="controls">
+        <input type="text" id="roomInput" placeholder="Enter 6-char Code">
+        <button onclick="joinRoom()">Join Room</button>
+    </div>
+
+    <div id="status">Select a game mode to start.</div>
+    <div id="board"></div>
+
+    <!-- External Libraries via CDN -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <script>
+        const socket = io();
+        let board = null;
+        let game = new Chess();
+        let playerColor = 'white';
+        let currentRoom = null;
+        let mode = 'local'; // 'local' or 'remote'
+
+        function onDragStart(source, piece, position, orientation) {
+            if (game.game_over()) return false;
+
+            if (mode === 'remote') {
+                // Prevent picking up opponent's pieces in remote mode
+                if ((playerColor === 'white' && piece.search(/^b/) !== -1) ||
+                    (playerColor === 'black' && piece.search(/^w/) !== -1)) {
+                    return false;
+                }
+                // Prevent moving out of turn
+                if ((game.turn() === 'w' && playerColor !== 'white') ||
+                    (game.turn() === 'b' && playerColor !== 'black')) {
+                    return false;
+                }
+            }
+        }
+
+        function onDrop(source, target) {
+            // Check if move is legal
+            const move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Default auto-promote to queen
+            });
+
+            if (move === null) return 'snapback';
+
+            updateStatus();
+
+            if (mode === 'remote' && currentRoom) {
+                socket.emit('make_move', { room_code: currentRoom, move: move });
+            }
+        }
+
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+
+        function updateStatus() {
+            let statusText = '';
+            let moveColor = game.turn() === 'w' ? 'White' : 'Black';
+
+            if (game.in_checkmate()) {
+                statusText = 'Game over, ' + moveColor + ' is in checkmate.';
+            } else if (game.in_draw()) {
+                statusText = 'Game over, drawn position.';
+            } else {
+                statusText = moveColor + ' to move.';
+                if (game.in_check()) {
+                    statusText += ' (' + moveColor + ' is in check)';
+                }
+            }
+            $('#status').text(statusText);
+        }
+
+        function startLocalGame() {
+            mode = 'local';
+            currentRoom = null;
+            game.reset();
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+            $('#status').text('Local game started. White to move.');
+        }
+
+        function createRoom() {
+            mode = 'remote';
+            socket.emit('create_room');
+        }
+
+        function joinRoom() {
+            const roomCode = $('#roomInput').val().trim();
+            if (roomCode.length === 0) return alert('Please enter a room code.');
+            mode = 'remote';
+            socket.emit('join_room', { room_code: roomCode });
+        }
+
+        // Socket Event Handlers
+        socket.on('room_created', (data) => {
+            currentRoom = data.room_code;
+            playerColor = data.color;
+            game.reset();
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                orientation: 'white',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+            $('#status').text('Room created! Code: ' + currentRoom + '. Waiting for opponent...');
+        });
+
+        socket.on('player_joined', (data) => {
+            currentRoom = data.room_code;
+            playerColor = data.color;
+            game.reset();
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                orientation: 'black',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+            $('#status').text('Joined room ' + currentRoom + ' as Black.');
+        });
+
+        socket.on('game_start', (data) => {
+            $('#status').text(data.message);
+        });
+
+        socket.on('move_made', (data) => {
+            game.move(data.move);
+            board.position(game.fen());
+            updateStatus();
+        });
+
+        socket.on('error_message', (data) => {
+            alert(data.message);
+        });
+
+        // Initialize board default state
+        startLocalGame();
+    </script>
+</body>
+</html>

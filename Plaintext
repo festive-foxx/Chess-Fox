@@ -1,0 +1,6 @@
+python-chess-app/
+├── app.py
+├── requirements.txt
+├── README.md
+└── templates/
+    └── index.html
