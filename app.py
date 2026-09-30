@@ -1,7 +1,7 @@
 import random
 import string
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, join_room, leave_room, emit
+from flask import Flask, render_template, request  # pyright: ignore[reportMissingImports]
+from flask_socketio import SocketIO, join_room, leave_room, emit  # pyright: ignore[reportMissingImports,reportMissingModuleSource]
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'chess_secret_key_123'
