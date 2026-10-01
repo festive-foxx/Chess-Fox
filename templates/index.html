@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Python Multiplayer Chess</title>
-    <!-- Chessboard.js CSS -->
+    <title>Python Online Chess</title>
+    <!-- Stylesheet for the Chessboard graphics -->
     <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
     <style>
         body {
@@ -13,7 +13,6 @@
             flex-direction: column;
             align-items: center;
             background-color: #f4f4f9;
-            margin: 0;
             padding: 20px;
         }
         #board {
@@ -37,10 +36,10 @@
 </head>
 <body>
 
-    <h1>Python Web Chess</h1>
+    <h1>Python Online Chess</h1>
 
     <div class="controls">
-        <button onclick="startLocalGame()">Play Local Pass-and-Play</button>
+        <button onclick="startLocalGame()">Play Pass-and-Play (Local)</button>
         <button onclick="createRoom()">Create Remote Room</button>
     </div>
 
@@ -52,7 +51,7 @@
     <div id="status">Select a game mode to start.</div>
     <div id="board"></div>
 
-    <!-- External Libraries via CDN -->
+    <!-- External JavaScript Libraries for Chess Logic & WebSockets -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
@@ -64,18 +63,20 @@
         let game = new Chess();
         let playerColor = 'white';
         let currentRoom = null;
-        let mode = 'local'; // 'local' or 'remote'
+        let mode = 'local';
 
+        // URL template to retrieve piece graphics over CDN online
+        const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
+
+        // Prevents picking up illegal pieces or moving out of turn
         function onDragStart(source, piece, position, orientation) {
             if (game.game_over()) return false;
 
             if (mode === 'remote') {
-                // Prevent picking up opponent's pieces in remote mode
                 if ((playerColor === 'white' && piece.search(/^b/) !== -1) ||
                     (playerColor === 'black' && piece.search(/^w/) !== -1)) {
                     return false;
                 }
-                // Prevent moving out of turn
                 if ((game.turn() === 'w' && playerColor !== 'white') ||
                     (game.turn() === 'b' && playerColor !== 'black')) {
                     return false;
@@ -83,18 +84,20 @@
             }
         }
 
+        // Handles dragging and dropping a piece on a square
         function onDrop(source, target) {
-            // Check if move is legal
             const move = game.move({
                 from: source,
                 to: target,
-                promotion: 'q' // Default auto-promote to queen
+                promotion: 'q' // Auto-promote pawns to Queen
             });
 
+            // Snap piece back if move is illegal
             if (move === null) return 'snapback';
 
             updateStatus();
 
+            // Send move to Python server if in remote mode
             if (mode === 'remote' && currentRoom) {
                 socket.emit('make_move', { room_code: currentRoom, move: move });
             }
@@ -109,9 +112,9 @@
             let moveColor = game.turn() === 'w' ? 'White' : 'Black';
 
             if (game.in_checkmate()) {
-                statusText = 'Game over, ' + moveColor + ' is in checkmate.';
+                statusText = 'Game over! ' + moveColor + ' is in checkmate.';
             } else if (game.in_draw()) {
-                statusText = 'Game over, drawn position.';
+                statusText = 'Game over! Stalemate / Draw.';
             } else {
                 statusText = moveColor + ' to move.';
                 if (game.in_check()) {
@@ -128,6 +131,7 @@
             board = Chessboard('board', {
                 draggable: true,
                 position: 'start',
+                pieceTheme: PIECE_THEME_URL, // Loads piece images from CDN
                 onDragStart: onDragStart,
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
@@ -147,7 +151,7 @@
             socket.emit('join_room', { room_code: roomCode });
         }
 
-        // Socket Event Handlers
+        // Socket event handlers from server
         socket.on('room_created', (data) => {
             currentRoom = data.room_code;
             playerColor = data.color;
@@ -156,11 +160,12 @@
                 draggable: true,
                 position: 'start',
                 orientation: 'white',
+                pieceTheme: PIECE_THEME_URL, // Loads piece images from CDN
                 onDragStart: onDragStart,
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
             });
-            $('#status').text('Room created! Code: ' + currentRoom + '. Waiting for opponent...');
+            $('#status').text('Room created! Code: ' + currentRoom + '. Share this code with Player 2.');
         });
 
         socket.on('player_joined', (data) => {
@@ -171,6 +176,7 @@
                 draggable: true,
                 position: 'start',
                 orientation: 'black',
+                pieceTheme: PIECE_THEME_URL, // Loads piece images from CDN
                 onDragStart: onDragStart,
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
@@ -192,7 +198,7 @@
             alert(data.message);
         });
 
-        // Initialize board default state
+        // Initialize local board on load
         startLocalGame();
     </script>
 </body>
