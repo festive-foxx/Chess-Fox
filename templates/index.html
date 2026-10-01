@@ -15,22 +15,85 @@
             background-color: #f4f4f9;
             padding: 20px;
         }
+        
+        .game-container {
+            display: flex;
+            gap: 20px;
+            margin-top: 15px;
+            align-items: flex-start;
+        }
+
         #board {
             width: 400px;
-            margin: 20px 0;
         }
+
         .controls {
             display: flex;
             gap: 10px;
             margin-bottom: 10px;
         }
+
         button, input {
             padding: 8px 12px;
             font-size: 14px;
         }
+
         #status {
             font-weight: bold;
             margin-top: 10px;
+            font-size: 16px;
+        }
+
+        /* Timers UI Styling */
+        .timer-box {
+            display: flex;
+            justify-content: space-between;
+            width: 400px;
+            margin-bottom: 10px;
+        }
+
+        .timer {
+            font-size: 20px;
+            font-weight: bold;
+            padding: 10px 15px;
+            border-radius: 6px;
+            background: #ffffff;
+            border: 2px solid #ccc;
+            width: 140px;
+            text-align: center;
+        }
+
+        .timer.active {
+            border-color: #4CAF50;
+            background-color: #e8f5e9;
+        }
+
+        /* Move History Box Styling */
+        .history-box {
+            width: 200px;
+            height: 400px;
+            background: #ffffff;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .history-box h3 {
+            margin-top: 0;
+            font-size: 16px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+
+        #moveList {
+            overflow-y: auto;
+            flex-grow: 1;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.6;
         }
     </style>
 </head>
@@ -48,8 +111,23 @@
         <button onclick="joinRoom()">Join Room</button>
     </div>
 
+    <!-- Clock Displays for White and Black -->
+    <div class="timer-box">
+        <div id="whiteTimer" class="timer">White: 05:00</div>
+        <div id="blackTimer" class="timer">Black: 05:00</div>
+    </div>
+
     <div id="status">Select a game mode to start.</div>
-    <div id="board"></div>
+
+    <!-- Main Game Area: Chessboard + Move History Side-by-Side -->
+    <div class="game-container">
+        <div id="board"></div>
+
+        <div class="history-box">
+            <h3>Moves Taken</h3>
+            <div id="moveList">No moves yet.</div>
+        </div>
+    </div>
 
     <!-- External JavaScript Libraries for Chess Logic & WebSockets -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -64,6 +142,12 @@
         let playerColor = 'white';
         let currentRoom = null;
         let mode = 'local';
+
+        // Timer Configuration (Adjustable: 300 seconds = 5 minutes)
+        const INITIAL_TIME_IN_SECONDS = 300; 
+        let whiteTime = INITIAL_TIME_IN_SECONDS;
+        let blackTime = INITIAL_TIME_IN_SECONDS;
+        let timerInterval = null;
 
         // URL template to retrieve piece graphics over CDN online
         const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
@@ -95,7 +179,7 @@
             // Snap piece back if move is illegal
             if (move === null) return 'snapback';
 
-            updateStatus();
+            updateGameState();
 
             // Send move to Python server if in remote mode
             if (mode === 'remote' && currentRoom) {
@@ -107,14 +191,23 @@
             board.position(game.fen());
         }
 
-        function updateStatus() {
+        // Updates game status, renders move history, and shifts timer focus
+        function updateGameState() {
+            updateStatusText();
+            renderMoveHistory();
+            startTimer();
+        }
+
+        function updateStatusText() {
             let statusText = '';
             let moveColor = game.turn() === 'w' ? 'White' : 'Black';
 
             if (game.in_checkmate()) {
                 statusText = 'Game over! ' + moveColor + ' is in checkmate.';
+                stopTimer();
             } else if (game.in_draw()) {
                 statusText = 'Game over! Stalemate / Draw.';
+                stopTimer();
             } else {
                 statusText = moveColor + ' to move.';
                 if (game.in_check()) {
@@ -124,19 +217,107 @@
             $('#status').text(statusText);
         }
 
+        /* --- Move History Helper Functions --- */
+        function renderMoveHistory() {
+            const history = game.history();
+            if (history.length === 0) {
+                $('#moveList').html('No moves yet.');
+                return;
+            }
+
+            let historyHTML = '';
+            for (let i = 0; i < history.length; i += 2) {
+                const moveNumber = Math.floor(i / 2) + 1;
+                const whiteMove = history[i];
+                const blackMove = history[i + 1] ? history[i + 1] : '';
+                historyHTML += `<div><strong>${moveNumber}.</strong> ${whiteMove} ${blackMove}</div>`;
+            }
+
+            const moveListDiv = $('#moveList');
+            moveListDiv.html(historyHTML);
+            // Automatically scroll to bottom of move list
+            moveListDiv.scrollTop(moveListDiv[0].scrollHeight);
+        }
+
+        /* --- Timer Helper Functions --- */
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        }
+
+        function updateTimerDisplay() {
+            $('#whiteTimer').text('White: ' + formatTime(whiteTime));
+            $('#blackTimer').text('Black: ' + formatTime(blackTime));
+
+            // Highlight the active turn's timer box
+            if (game.turn() === 'w') {
+                $('#whiteTimer').addClass('active');
+                $('#blackTimer').removeClass('active');
+            } else {
+                $('#blackTimer').addClass('active');
+                $('#whiteTimer').removeClass('active');
+            }
+        }
+
+        function startTimer() {
+            stopTimer(); // Clear any existing running interval
+
+            if (game.game_over()) return;
+
+            updateTimerDisplay();
+
+            timerInterval = setInterval(() => {
+                if (game.turn() === 'w') {
+                    whiteTime--;
+                    if (whiteTime <= 0) {
+                        whiteTime = 0;
+                        stopTimer();
+                        $('#status').text('Game Over! Black wins on time.');
+                    }
+                } else {
+                    blackTime--;
+                    if (blackTime <= 0) {
+                        blackTime = 0;
+                        stopTimer();
+                        $('#status').text('Game Over! White wins on time.');
+                    }
+                }
+                updateTimerDisplay();
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function resetTimers() {
+            stopTimer();
+            whiteTime = INITIAL_TIME_IN_SECONDS;
+            blackTime = INITIAL_TIME_IN_SECONDS;
+            updateTimerDisplay();
+        }
+
+        /* --- Game Mode Handlers --- */
         function startLocalGame() {
             mode = 'local';
             currentRoom = null;
             game.reset();
+            resetTimers();
+            renderMoveHistory();
             board = Chessboard('board', {
                 draggable: true,
                 position: 'start',
-                pieceTheme: PIECE_THEME_URL, // Loads piece images from CDN
+                pieceTheme: PIECE_THEME_URL,
                 onDragStart: onDragStart,
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
             });
             $('#status').text('Local game started. White to move.');
+            startTimer();
         }
 
         function createRoom() {
@@ -151,16 +332,18 @@
             socket.emit('join_room', { room_code: roomCode });
         }
 
-        // Socket event handlers from server
+        /* --- Socket Event Handlers --- */
         socket.on('room_created', (data) => {
             currentRoom = data.room_code;
             playerColor = data.color;
             game.reset();
+            resetTimers();
+            renderMoveHistory();
             board = Chessboard('board', {
                 draggable: true,
                 position: 'start',
                 orientation: 'white',
-                pieceTheme: PIECE_THEME_URL, // Loads piece images from CDN
+                pieceTheme: PIECE_THEME_URL,
                 onDragStart: onDragStart,
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
@@ -172,11 +355,13 @@
             currentRoom = data.room_code;
             playerColor = data.color;
             game.reset();
+            resetTimers();
+            renderMoveHistory();
             board = Chessboard('board', {
                 draggable: true,
                 position: 'start',
                 orientation: 'black',
-                pieceTheme: PIECE_THEME_URL, // Loads piece images from CDN
+                pieceTheme: PIECE_THEME_URL,
                 onDragStart: onDragStart,
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
@@ -186,12 +371,13 @@
 
         socket.on('game_start', (data) => {
             $('#status').text(data.message);
+            startTimer();
         });
 
         socket.on('move_made', (data) => {
             game.move(data.move);
             board.position(game.fen());
-            updateStatus();
+            updateGameState();
         });
 
         socket.on('error_message', (data) => {
