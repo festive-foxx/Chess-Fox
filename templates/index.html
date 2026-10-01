@@ -58,6 +58,16 @@
             transform: translateY(0);
         }
 
+        /* Secondary Button Style */
+        button.secondary {
+            background-color: #2a2a36;
+            border: 1px solid #ff6b35;
+        }
+
+        button.secondary:hover {
+            background-color: #3b3b4d;
+        }
+
         /* Styled Input Fields */
         input {
             padding: 10px 14px;
@@ -74,12 +84,47 @@
             color: #888899;
         }
 
+        /* Interactive Tutorial Card Styling */
+        #tutorialCard {
+            display: none;
+            width: 620px;
+            background-color: #2a2a36;
+            border: 2px solid #ff6b35;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 0 15px rgba(255, 107, 53, 0.3);
+            box-sizing: border-box;
+        }
+
+        #tutorialCard h2 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            color: #ffaa5b;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #tutorialCard p {
+            margin: 5px 0;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #dddddd;
+        }
+
+        #tutorialHint {
+            font-style: italic;
+            color: #ff6b35;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+
         #status {
             font-weight: bold;
             margin-top: 5px;
             margin-bottom: 15px;
             font-size: 16px;
-            color: #ffaa5b; /* Soft warm orange status text */
+            color: #ffaa5b;
             height: 24px;
         }
 
@@ -106,7 +151,7 @@
         }
 
         .timer.active {
-            border-color: #ff6b35; /* Orange highlight for active turn */
+            border-color: #ff6b35;
             box-shadow: 0 0 12px rgba(255, 107, 53, 0.5);
         }
 
@@ -164,14 +209,26 @@
 
     <h1>Fox Chess</h1>
 
+    <!-- Mode Selection Controls -->
     <div class="controls">
-        <button onclick="startLocalGame()">Play Pass-and-Play (Local)</button>
-        <button onclick="createRoom()">Create Remote Room</button>
+        <button onclick="startTutorialMode()">Interactive Tutorial Mode</button>
+        <button class="secondary" onclick="startLocalGame()">Pass-and-Play (Local)</button>
+        <button class="secondary" onclick="createRoom()">Create Remote Room</button>
     </div>
 
     <div class="controls">
         <input type="text" id="roomInput" placeholder="Enter 6-char Code">
-        <button onclick="joinRoom()">Join Room</button>
+        <button class="secondary" onclick="joinRoom()">Join Room</button>
+    </div>
+
+    <!-- Tutorial Guided Lesson Banner -->
+    <div id="tutorialCard">
+        <h2>
+            <span id="lessonTitle">Lesson 1: Center Control</span>
+            <span id="lessonStep">Step 1 / 5</span>
+        </h2>
+        <p id="lessonText">Instructions go here...</p>
+        <div id="tutorialHint">Goal: Move piece from e2 to e4</div>
     </div>
 
     <!-- Clock Displays for White and Black -->
@@ -194,7 +251,6 @@
 
     <!-- External JavaScript Libraries for Chess Logic & WebSockets -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"></script>
     <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
@@ -205,7 +261,7 @@
         let game = new Chess();
         let playerColor = 'white';
         let currentRoom = null;
-        let mode = 'local';
+        let mode = 'local'; // Options: 'local', 'remote', 'tutorial'
 
         // Timer Configuration (300 seconds = 5 minutes)
         const INITIAL_TIME_IN_SECONDS = 300; 
@@ -213,7 +269,52 @@
         let blackTime = INITIAL_TIME_IN_SECONDS;
         let timerInterval = null;
 
-        // URL template to retrieve piece graphics over CDN online
+        // Tutorial Lesson Data Structure
+        let tutorialStep = 0;
+        const tutorialLessons = [
+            {
+                title: "Lesson 1: Pawn Center Control",
+                text: "Pawns move forward 1 or 2 squares on their first move. Controlling the center squares (d4, e4, d5, e5) gives your pieces room to maneuver.",
+                from: "e2",
+                to: "e4",
+                opponentMove: { from: "e7", to: "e5" },
+                hint: "Try dragging your King's Pawn from e2 to e4."
+            },
+            {
+                title: "Lesson 2: Developing Knights",
+                text: "Knights move in an 'L' shape and can jump over pieces. Moving knights toward the center early helps control the board.",
+                from: "g1",
+                to: "f3",
+                opponentMove: { from: "b8", to: "c6" },
+                hint: "Move your Knight from g1 to f3 to attack Black's e5 pawn."
+            },
+            {
+                title: "Lesson 3: Developing Bishops",
+                text: "Bishops control long diagonals. Developing your King's Bishop opens up avenues to attack the enemy King.",
+                from: "f1",
+                to: "c4",
+                opponentMove: { from: "a7", to: "a6" },
+                hint: "Move your Bishop from f1 to c4 to target Black's weak f7 pawn."
+            },
+            {
+                title: "Lesson 4: Queen Infiltration",
+                text: "Bring your Queen out to join the attack on the weak f7 square.",
+                from: "d1",
+                to: "h5",
+                opponentMove: { from: "d7", to: "d6" },
+                hint: "Move your Queen diagonally from d1 to h5."
+            },
+            {
+                title: "Lesson 5: Delivering Checkmate!",
+                text: "The weak f7 pawn is defended only by Black's King. Capture it with your Queen to deliver Checkmate!",
+                from: "h5",
+                to: "f7",
+                opponentMove: null, // Checkmate ends the lesson
+                hint: "Move your Queen from h5 to f7 to win the game!"
+            }
+        ];
+
+        // Graphic theme URL for piece images
         const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
 
         // Prevents picking up illegal pieces or moving out of turn
@@ -229,25 +330,39 @@
                     (game.turn() === 'b' && playerColor !== 'black')) {
                     return false;
                 }
+            } else if (mode === 'tutorial') {
+                // In tutorial, player only moves White
+                if (piece.search(/^b/) !== -1 || game.turn() !== 'w') {
+                    return false;
+                }
             }
         }
 
         // Handles dragging and dropping a piece on a square
         function onDrop(source, target) {
+            // Check move correctness if in Tutorial Mode
+            if (mode === 'tutorial') {
+                const currentLesson = tutorialLessons[tutorialStep];
+                if (source !== currentLesson.from || target !== currentLesson.to) {
+                    $('#tutorialHint').text("❌ Incorrect move! " + currentLesson.hint);
+                    return 'snapback';
+                }
+            }
+
             const move = game.move({
                 from: source,
                 to: target,
-                promotion: 'q' // Auto-promote pawns to Queen
+                promotion: 'q'
             });
 
-            // Snap piece back if move is illegal
             if (move === null) return 'snapback';
 
             updateGameState();
 
-            // Send move to Python server if in remote mode
             if (mode === 'remote' && currentRoom) {
                 socket.emit('make_move', { room_code: currentRoom, move: move });
+            } else if (mode === 'tutorial') {
+                handleTutorialProgress();
             }
         }
 
@@ -255,11 +370,73 @@
             board.position(game.fen());
         }
 
-        // Updates game status, renders move history, and shifts timer focus
+        /* --- Tutorial Logic Handlers --- */
+        function startTutorialMode() {
+            mode = 'tutorial';
+            currentRoom = null;
+            tutorialStep = 0;
+            
+            stopTimer(); // Timers stay off during tutorial
+            $('#whiteTimer').text('White: --:--').removeClass('active');
+            $('#blackTimer').text('Black: --:--').removeClass('active');
+            
+            $('#tutorialCard').slideDown();
+            game.reset();
+            renderMoveHistory();
+
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                pieceTheme: PIECE_THEME_URL,
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+
+            loadTutorialLesson(tutorialStep);
+        }
+
+        function loadTutorialLesson(step) {
+            const lesson = tutorialLessons[step];
+            $('#lessonTitle').text(lesson.title);
+            $('#lessonStep').text(`Step ${step + 1} / ${tutorialLessons.length}`);
+            $('#lessonText').text(lesson.text);
+            $('#tutorialHint').text("💡 Target: Move " + lesson.from.toUpperCase() + " to " + lesson.to.toUpperCase());
+            $('#status').text("Tutorial Mode: Your turn (White)");
+        }
+
+        function handleTutorialProgress() {
+            const lesson = tutorialLessons[tutorialStep];
+            
+            if (lesson.opponentMove) {
+                $('#status').text("Opponent is thinking...");
+                setTimeout(() => {
+                    game.move(lesson.opponentMove);
+                    board.position(game.fen());
+                    renderMoveHistory();
+                    
+                    tutorialStep++;
+                    if (tutorialStep < tutorialLessons.length) {
+                        loadTutorialLesson(tutorialStep);
+                    }
+                }, 700);
+            } else {
+                // Final Checkmate Lesson completed
+                $('#tutorialCard').css('border-color', '#4CAF50');
+                $('#lessonTitle').text("🎉 Tutorial Completed!");
+                $('#lessonText').text("Congratulations! You've learned how to develop your pieces and execute a classic checkmate sequence.");
+                $('#tutorialHint').text("Ready to play? Select Pass-and-Play or Remote Room above!");
+                $('#status').text("Checkmate! Tutorial completed successfully.");
+            }
+        }
+
+        /* --- Game Status & UI Updates --- */
         function updateGameState() {
             updateStatusText();
             renderMoveHistory();
-            startTimer();
+            if (mode !== 'tutorial') {
+                startTimer();
+            }
         }
 
         function updateStatusText() {
@@ -281,7 +458,6 @@
             $('#status').text(statusText);
         }
 
-        /* --- Move History Helper Functions --- */
         function renderMoveHistory() {
             const history = game.history();
             if (history.length === 0) {
@@ -302,7 +478,7 @@
             moveListDiv.scrollTop(moveListDiv[0].scrollHeight);
         }
 
-        /* --- Timer Helper Functions --- */
+        /* --- Timer Functions --- */
         function formatTime(seconds) {
             const mins = Math.floor(seconds / 60);
             const secs = seconds % 60;
@@ -324,7 +500,6 @@
 
         function startTimer() {
             stopTimer();
-
             if (game.game_over()) return;
 
             updateTimerDisplay();
@@ -367,6 +542,7 @@
         function startLocalGame() {
             mode = 'local';
             currentRoom = null;
+            $('#tutorialCard').slideUp();
             game.reset();
             resetTimers();
             renderMoveHistory();
@@ -384,6 +560,7 @@
 
         function createRoom() {
             mode = 'remote';
+            $('#tutorialCard').slideUp();
             socket.emit('create_room');
         }
 
@@ -391,6 +568,7 @@
             const roomCode = $('#roomInput').val().trim();
             if (roomCode.length === 0) return alert('Please enter a room code.');
             mode = 'remote';
+            $('#tutorialCard').slideUp();
             socket.emit('join_room', { room_code: roomCode });
         }
 
