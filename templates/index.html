@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fox Chess</title>
-    <!-- Stylesheet for the Chessboard graphics -->
+    <!-- Stylesheet for Chessboard graphics -->
     <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
     <style>
-        /* Base page styling (Dark Slate Theme) */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
@@ -21,7 +20,7 @@
         }
 
         h1 {
-            color: #ff6b35; /* Vibrant Fox Orange */
+            color: #ff6b35;
             margin-top: 10px;
             margin-bottom: 20px;
             font-size: 2.2rem;
@@ -35,7 +34,6 @@
             margin-bottom: 12px;
         }
 
-        /* Modernized Buttons */
         button {
             padding: 10px 16px;
             font-size: 14px;
@@ -54,11 +52,6 @@
             transform: translateY(-1px);
         }
 
-        button:active {
-            transform: translateY(0);
-        }
-
-        /* Secondary Button Style */
         button.secondary {
             background-color: #2a2a36;
             border: 1px solid #ff6b35;
@@ -68,7 +61,16 @@
             background-color: #3b3b4d;
         }
 
-        /* Styled Input Fields */
+        button.spectate-btn {
+            background-color: #4a5568;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        button.spectate-btn:hover {
+            background-color: #2d3748;
+        }
+
         input {
             padding: 10px 14px;
             font-size: 14px;
@@ -77,46 +79,43 @@
             background-color: #2a2a36;
             color: #ffffff;
             outline: none;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
         }
 
-        input::placeholder {
-            color: #888899;
-        }
-
-        /* Interactive Tutorial Card Styling */
-        #tutorialCard {
-            display: none;
+        /* Ongoing Games Lobby Styling */
+        #lobbyCard {
             width: 620px;
             background-color: #2a2a36;
-            border: 2px solid #ff6b35;
+            border: 1px solid #444;
             border-radius: 8px;
-            padding: 15px 20px;
+            padding: 15px;
             margin-bottom: 15px;
-            box-shadow: 0 0 15px rgba(255, 107, 53, 0.3);
             box-sizing: border-box;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4);
         }
 
-        #tutorialCard h2 {
-            margin: 0 0 8px 0;
-            font-size: 18px;
+        #lobbyCard h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
             color: #ffaa5b;
+            font-size: 16px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 6px;
+        }
+
+        .game-item {
             display: flex;
             justify-content: space-between;
-        }
-
-        #tutorialCard p {
-            margin: 5px 0;
+            align-items: center;
+            padding: 8px 12px;
+            background-color: #1a1a24;
+            border-radius: 6px;
+            margin-bottom: 6px;
             font-size: 14px;
-            line-height: 1.5;
-            color: #dddddd;
         }
 
-        #tutorialHint {
-            font-style: italic;
-            color: #ff6b35;
-            font-weight: bold;
-            margin-top: 8px;
+        .game-item-actions {
+            display: flex;
+            gap: 8px;
         }
 
         #status {
@@ -128,7 +127,6 @@
             height: 24px;
         }
 
-        /* Timers UI Styling */
         .timer-box {
             display: flex;
             justify-content: space-between;
@@ -147,7 +145,6 @@
             width: 140px;
             text-align: center;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
 
         .timer.active {
@@ -155,7 +152,6 @@
             box-shadow: 0 0 12px rgba(255, 107, 53, 0.5);
         }
 
-        /* Main Board & Move History Layout */
         .game-container {
             display: flex;
             gap: 20px;
@@ -169,7 +165,6 @@
             overflow: hidden;
         }
 
-        /* Move History Box Styling */
         .history-box {
             width: 200px;
             height: 400px;
@@ -209,10 +204,8 @@
 
     <h1>Fox Chess</h1>
 
-    <!-- Mode Selection Controls -->
     <div class="controls">
         <button onclick="startAIGame()">Play vs AI</button>
-        <button class="secondary" onclick="startTutorialMode()">Tutorial Mode</button>
         <button class="secondary" onclick="startLocalGame()">Pass-and-Play (Local)</button>
         <button class="secondary" onclick="createRoom()">Create Remote Room</button>
     </div>
@@ -222,17 +215,12 @@
         <button class="secondary" onclick="joinRoom()">Join Room</button>
     </div>
 
-    <!-- Tutorial Guided Lesson Banner -->
-    <div id="tutorialCard">
-        <h2>
-            <span id="lessonTitle">Lesson 1: Center Control</span>
-            <span id="lessonStep">Step 1 / 5</span>
-        </h2>
-        <p id="lessonText">Instructions go here...</p>
-        <div id="tutorialHint">Goal: Move piece from e2 to e4</div>
+    <!-- Active Matches Lobby -->
+    <div id="lobbyCard">
+        <h3>Ongoing & Waiting Matches</h3>
+        <div id="gameList">No active matches online. Create one to begin!</div>
     </div>
 
-    <!-- Clock Displays for White and Black -->
     <div class="timer-box">
         <div id="whiteTimer" class="timer">White: 05:00</div>
         <div id="blackTimer" class="timer">Black: 05:00</div>
@@ -240,7 +228,6 @@
 
     <div id="status">Select a game mode to start.</div>
 
-    <!-- Main Game Area: Chessboard + Move History Side-by-Side -->
     <div class="game-container">
         <div id="board"></div>
 
@@ -250,7 +237,7 @@
         </div>
     </div>
 
-    <!-- External JavaScript Libraries for Chess Logic & WebSockets -->
+    <!-- JavaScript Dependencies -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
@@ -262,173 +249,18 @@
         let game = new Chess();
         let playerColor = 'white';
         let currentRoom = null;
-        let mode = 'ai'; // Options: 'local', 'remote', 'tutorial', 'ai'
+        let mode = 'ai'; // 'local', 'remote', 'ai', 'spectator'
 
-        // Timer Configuration (300 seconds = 5 minutes)
         const INITIAL_TIME_IN_SECONDS = 300; 
         let whiteTime = INITIAL_TIME_IN_SECONDS;
         let blackTime = INITIAL_TIME_IN_SECONDS;
         let timerInterval = null;
 
-        // Tutorial Lesson Data Structure
-        let tutorialStep = 0;
-        const tutorialLessons = [
-            {
-                title: "Lesson 1: Pawn Center Control",
-                text: "Pawns move forward 1 or 2 squares on their first move. Controlling the center squares (d4, e4, d5, e5) gives your pieces room to maneuver.",
-                from: "e2", to: "e4",
-                opponentMove: { from: "e7", to: "e5" },
-                hint: "Try dragging your King's Pawn from e2 to e4."
-            },
-            {
-                title: "Lesson 2: Developing Knights",
-                text: "Knights move in an 'L' shape and can jump over pieces. Moving knights toward the center early helps control the board.",
-                from: "g1", to: "f3",
-                opponentMove: { from: "b8", to: "c6" },
-                hint: "Move your Knight from g1 to f3 to attack Black's e5 pawn."
-            },
-            {
-                title: "Lesson 3: Developing Bishops",
-                text: "Bishops control long diagonals. Developing your King's Bishop opens up avenues to attack the enemy King.",
-                from: "f1", to: "c4",
-                opponentMove: { from: "a7", to: "a6" },
-                hint: "Move your Bishop from f1 to c4 to target Black's weak f7 pawn."
-            },
-            {
-                title: "Lesson 4: Queen Infiltration",
-                text: "Bring your Queen out to join the attack on the weak f7 square.",
-                from: "d1", to: "h5",
-                opponentMove: { from: "d7", to: "d6" },
-                hint: "Move your Queen diagonally from d1 to h5."
-            },
-            {
-                title: "Lesson 5: Delivering Checkmate!",
-                text: "The weak f7 pawn is defended only by Black's King. Capture it with your Queen to deliver Checkmate!",
-                from: "h5", to: "f7",
-                opponentMove: null,
-                hint: "Move your Queen from h5 to f7 to win the game!"
-            }
-        ];
-
-        // Graphic theme URL for piece images
         const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
 
-        /* -------------------------------------------------------------
-           CHESS AI ENGINE (MINIMAX WITH BOARD EVALUATION)
-        ------------------------------------------------------------- */
-        
-        // Base piece values for material calculation
-        const PIECE_VALUES = {
-            'p': 10, 'n': 30, 'b': 30, 'r': 50, 'q': 90, 'k': 900
-        };
-
-        // Positional bonus scores to encourage central control
-        const PAWN_TABLE = [
-            0,  0,  0,  0,  0,  0,  0,  0,
-            5, 10, 10,-20,-20, 10, 10,  5,
-            1,  2,  3,  5,  5,  3,  2,  1,
-            0,  0,  0, 20, 20,  0,  0,  0,
-            1,  1,  2, 10, 10,  2,  1,  1,
-            1, -1, -2,  0,  0, -2, -1,  1,
-            1,  2,  2,-20,-20,  2,  2,  1,
-            0,  0,  0,  0,  0,  0,  0,  0
-        ];
-
-        // Evaluates current board score (positive = good for White, negative = good for Black)
-        function evaluateBoard(boardState) {
-            let totalEvaluation = 0;
-            for (let row = 0; row < 8; row++) {
-                for (let col = 0; col < 8; col++) {
-                    const piece = boardState[row][col];
-                    if (piece) {
-                        const val = PIECE_VALUES[piece.type];
-                        const positionBonus = (piece.type === 'p') ? PAWN_TABLE[row * 8 + col] : 0;
-                        const score = val + positionBonus;
-                        
-                        totalEvaluation += (piece.color === 'w') ? score : -score;
-                    }
-                }
-            }
-            return totalEvaluation;
-        }
-
-        // Minimax recursive decision algorithm
-        function minimax(gameInstance, depth, alpha, beta, isMaximizing) {
-            if (depth === 0 || gameInstance.game_over()) {
-                return evaluateBoard(gameInstance.board());
-            }
-
-            const possibleMoves = gameInstance.moves({ verbose: true });
-
-            if (isMaximizing) {
-                let maxEval = -Infinity;
-                for (let i = 0; i < possibleMoves.length; i++) {
-                    gameInstance.move(possibleMoves[i]);
-                    let evaluation = minimax(gameInstance, depth - 1, alpha, beta, false);
-                    gameInstance.undo();
-                    maxEval = Math.max(maxEval, evaluation);
-                    alpha = Math.max(alpha, evaluation);
-                    if (beta <= alpha) break; // Alpha-Beta Pruning
-                }
-                return maxEval;
-            } else {
-                let minEval = Infinity;
-                for (let i = 0; i < possibleMoves.length; i++) {
-                    gameInstance.move(possibleMoves[i]);
-                    let evaluation = minimax(gameInstance, depth - 1, alpha, beta, true);
-                    gameInstance.undo();
-                    minEval = Math.min(minEval, evaluation);
-                    beta = Math.min(beta, evaluation);
-                    if (beta <= alpha) break;
-                }
-                return minEval;
-            }
-        }
-
-        // Calculates and executes the best move for the AI (Black)
-        function makeAIMove() {
-            if (game.game_over()) return;
-
-            $('#status').text("Fox AI is thinking...");
-            
-            setTimeout(() => {
-                const possibleMoves = game.moves({ verbose: true });
-                if (possibleMoves.length === 0) return;
-
-                let bestMove = null;
-                let bestValue = Infinity; // AI plays Black, seeking minimum evaluation score
-
-                // Evaluate best move at Depth 2
-                for (let i = 0; i < possibleMoves.length; i++) {
-                    const move = possibleMoves[i];
-                    game.move(move);
-                    let boardValue = minimax(game, 2, -Infinity, Infinity, true);
-                    game.undo();
-
-                    if (boardValue < bestValue) {
-                        bestValue = boardValue;
-                        bestMove = move;
-                    }
-                }
-
-                // Fallback to random move if no best move found
-                if (!bestMove) {
-                    bestMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-                }
-
-                game.move(bestMove);
-                board.position(game.fen());
-                updateGameState();
-            }, 350); // Small natural delay
-        }
-
-        /* -------------------------------------------------------------
-           BOARD EVENT HANDLERS
-        ------------------------------------------------------------- */
-
-        // Prevents picking up illegal pieces or moving out of turn
+        /* --- Drag and Drop Restrictions --- */
         function onDragStart(source, piece, position, orientation) {
-            if (game.game_over()) return false;
+            if (game.game_over() || mode === 'spectator') return false;
 
             if (mode === 'remote') {
                 if ((playerColor === 'white' && piece.search(/^b/) !== -1) ||
@@ -439,24 +271,12 @@
                     (game.turn() === 'b' && playerColor !== 'black')) {
                     return false;
                 }
-            } else if (mode === 'tutorial' || mode === 'ai') {
-                // In AI and Tutorial mode, player controls White
-                if (piece.search(/^b/) !== -1 || game.turn() !== 'w') {
-                    return false;
-                }
+            } else if (mode === 'ai') {
+                if (piece.search(/^b/) !== -1 || game.turn() !== 'w') return false;
             }
         }
 
-        // Handles dragging and dropping a piece on a square
         function onDrop(source, target) {
-            if (mode === 'tutorial') {
-                const currentLesson = tutorialLessons[tutorialStep];
-                if (source !== currentLesson.from || target !== currentLesson.to) {
-                    $('#tutorialHint').text("❌ Incorrect move! " + currentLesson.hint);
-                    return 'snapback';
-                }
-            }
-
             const move = game.move({
                 from: source,
                 to: target,
@@ -468,9 +288,7 @@
             updateGameState();
 
             if (mode === 'remote' && currentRoom) {
-                socket.emit('make_move', { room_code: currentRoom, move: move });
-            } else if (mode === 'tutorial') {
-                handleTutorialProgress();
+                socket.emit('make_move', { room_code: currentRoom, move: move, fen: game.fen() });
             } else if (mode === 'ai' && game.turn() === 'b') {
                 makeAIMove();
             }
@@ -480,96 +298,82 @@
             board.position(game.fen());
         }
 
-        /* --- Mode Initialization Handlers --- */
-        function startAIGame() {
-            mode = 'ai';
-            currentRoom = null;
-            $('#tutorialCard').slideUp();
-            game.reset();
-            resetTimers();
-            renderMoveHistory();
-            board = Chessboard('board', {
-                draggable: true,
-                position: 'start',
-                pieceTheme: PIECE_THEME_URL,
-                onDragStart: onDragStart,
-                onDrop: onDrop,
-                onSnapEnd: onSnapEnd
-            });
-            $('#status').text('Playing vs Fox AI. You are White!');
-            startTimer();
+        /* --- AI Logic --- */
+        function makeAIMove() {
+            if (game.game_over()) return;
+            $('#status').text("Fox AI is thinking...");
+            
+            setTimeout(() => {
+                const possibleMoves = game.moves();
+                if (possibleMoves.length === 0) return;
+                
+                const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                game.move(randomMove);
+                board.position(game.fen());
+                updateGameState();
+            }, 350);
         }
 
-        function startTutorialMode() {
-            mode = 'tutorial';
-            currentRoom = null;
-            tutorialStep = 0;
-            
-            stopTimer();
-            $('#whiteTimer').text('White: --:--').removeClass('active');
-            $('#blackTimer').text('Black: --:--').removeClass('active');
-            
-            $('#tutorialCard').slideDown();
-            game.reset();
-            renderMoveHistory();
-
-            board = Chessboard('board', {
-                draggable: true,
-                position: 'start',
-                pieceTheme: PIECE_THEME_URL,
-                onDragStart: onDragStart,
-                onDrop: onDrop,
-                onSnapEnd: onSnapEnd
-            });
-
-            loadTutorialLesson(tutorialStep);
-        }
-
-        function loadTutorialLesson(step) {
-            const lesson = tutorialLessons[step];
-            $('#lessonTitle').text(lesson.title);
-            $('#lessonStep').text(`Step ${step + 1} / ${tutorialLessons.length}`);
-            $('#lessonText').text(lesson.text);
-            $('#tutorialHint').text("💡 Target: Move " + lesson.from.toUpperCase() + " to " + lesson.to.toUpperCase());
-            $('#status').text("Tutorial Mode: Your turn (White)");
-        }
-
-        function handleTutorialProgress() {
-            const lesson = tutorialLessons[tutorialStep];
-            
-            if (lesson.opponentMove) {
-                $('#status').text("Opponent is thinking...");
-                setTimeout(() => {
-                    game.move(lesson.opponentMove);
-                    board.position(game.fen());
-                    renderMoveHistory();
-                    
-                    tutorialStep++;
-                    if (tutorialStep < tutorialLessons.length) {
-                        loadTutorialLesson(tutorialStep);
-                    }
-                }, 700);
-            } else {
-                $('#tutorialCard').css('border-color', '#4CAF50');
-                $('#lessonTitle').text("🎉 Tutorial Completed!");
-                $('#lessonText').text("Congratulations! You've learned how to develop your pieces and execute a classic checkmate sequence.");
-                $('#tutorialHint').text("Ready to play? Select Play vs AI or Pass-and-Play above!");
-                $('#status').text("Checkmate! Tutorial completed successfully.");
+        /* --- Lobby & Spectator Handlers --- */
+        socket.on('game_list_updated', (games) => {
+            if (games.length === 0) {
+                $('#gameList').html('No active matches online. Create one to begin!');
+                return;
             }
+
+            let html = '';
+            games.forEach(g => {
+                const canJoin = g.player_count < 2;
+                html += `
+                    <div class="game-item">
+                        <span><strong>Room ${g.code}</strong> - ${g.status} (${g.spectator_count} spectating)</span>
+                        <div class="game-item-actions">
+                            ${canJoin ? `<button onclick="quickJoin('${g.code}')">Join as P2</button>` : ''}
+                            <button class="spectate-btn" onclick="spectateRoom('${g.code}')">Spectate</button>
+                        </div>
+                    </div>
+                `;
+            });
+            $('#gameList').html(html);
+        });
+
+        function quickJoin(code) {
+            $('#roomInput').val(code);
+            joinRoom();
         }
 
-        /* --- Game Status & UI Updates --- */
+        function spectateRoom(code) {
+            mode = 'spectator';
+            currentRoom = code;
+            socket.emit('spectate_room', { room_code: code });
+        }
+
+        socket.on('spectate_joined', (data) => {
+            currentRoom = data.room_code;
+            game.load(data.fen);
+            resetTimers();
+
+            board = Chessboard('board', {
+                draggable: false, // Spectators cannot move pieces
+                position: data.fen,
+                pieceTheme: PIECE_THEME_URL
+            });
+
+            renderMoveHistory();
+            $('#status').text('Spectating Match: ' + currentRoom);
+            startTimer();
+        });
+
+        /* --- Game State & Timer Updates --- */
         function updateGameState() {
             updateStatusText();
             renderMoveHistory();
-            if (mode !== 'tutorial') {
-                startTimer();
-            }
+            startTimer();
         }
 
         function updateStatusText() {
-            let statusText = '';
             let moveColor = game.turn() === 'w' ? 'White' : 'Black';
+            let statusText = '';
 
             if (game.in_checkmate()) {
                 statusText = 'Game over! ' + moveColor + ' is in checkmate.';
@@ -578,10 +382,8 @@
                 statusText = 'Game over! Stalemate / Draw.';
                 stopTimer();
             } else {
-                statusText = moveColor + ' to move.';
-                if (game.in_check()) {
-                    statusText += ' (' + moveColor + ' is in check)';
-                }
+                statusText = (mode === 'spectator' ? 'Spectating: ' : '') + moveColor + ' to move.';
+                if (game.in_check()) statusText += ' (' + moveColor + ' is in check)';
             }
             $('#status').text(statusText);
         }
@@ -606,7 +408,6 @@
             moveListDiv.scrollTop(moveListDiv[0].scrollHeight);
         }
 
-        /* --- Timer Functions --- */
         function formatTime(seconds) {
             const mins = Math.floor(seconds / 60);
             const secs = seconds % 60;
@@ -629,7 +430,6 @@
         function startTimer() {
             stopTimer();
             if (game.game_over()) return;
-
             updateTimerDisplay();
 
             timerInterval = setInterval(() => {
@@ -666,11 +466,28 @@
             updateTimerDisplay();
         }
 
-        /* --- Game Mode Handlers --- */
+        /* --- Mode Controls --- */
+        function startAIGame() {
+            mode = 'ai';
+            currentRoom = null;
+            game.reset();
+            resetTimers();
+            renderMoveHistory();
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                pieceTheme: PIECE_THEME_URL,
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+            $('#status').text('Playing vs Fox AI. You are White!');
+            startTimer();
+        }
+
         function startLocalGame() {
             mode = 'local';
             currentRoom = null;
-            $('#tutorialCard').slideUp();
             game.reset();
             resetTimers();
             renderMoveHistory();
@@ -688,7 +505,6 @@
 
         function createRoom() {
             mode = 'remote';
-            $('#tutorialCard').slideUp();
             socket.emit('create_room');
         }
 
@@ -696,11 +512,10 @@
             const roomCode = $('#roomInput').val().trim();
             if (roomCode.length === 0) return alert('Please enter a room code.');
             mode = 'remote';
-            $('#tutorialCard').slideUp();
             socket.emit('join_room', { room_code: roomCode });
         }
 
-        /* --- Socket Event Handlers --- */
+        /* --- Socket Listeners --- */
         socket.on('room_created', (data) => {
             currentRoom = data.room_code;
             playerColor = data.color;
@@ -716,7 +531,7 @@
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
             });
-            $('#status').text('Room created! Code: ' + currentRoom + '. Share this code with Player 2.');
+            $('#status').text('Room created! Code: ' + currentRoom + '. Waiting for Player 2...');
         });
 
         socket.on('player_joined', (data) => {
@@ -743,7 +558,11 @@
         });
 
         socket.on('move_made', (data) => {
-            game.move(data.move);
+            if (data.fen) {
+                game.load(data.fen);
+            } else if (data.move) {
+                game.move(data.move);
+            }
             board.position(game.fen());
             updateGameState();
         });
@@ -752,7 +571,6 @@
             alert(data.message);
         });
 
-        // Initialize AI Game mode as default on initial page load
         startAIGame();
     </script>
 </body>
