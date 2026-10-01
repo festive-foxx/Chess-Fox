@@ -211,7 +211,8 @@
 
     <!-- Mode Selection Controls -->
     <div class="controls">
-        <button onclick="startTutorialMode()">Interactive Tutorial Mode</button>
+        <button onclick="startAIGame()">Play vs AI</button>
+        <button class="secondary" onclick="startTutorialMode()">Tutorial Mode</button>
         <button class="secondary" onclick="startLocalGame()">Pass-and-Play (Local)</button>
         <button class="secondary" onclick="createRoom()">Create Remote Room</button>
     </div>
@@ -261,7 +262,7 @@
         let game = new Chess();
         let playerColor = 'white';
         let currentRoom = null;
-        let mode = 'local'; // Options: 'local', 'remote', 'tutorial'
+        let mode = 'ai'; // Options: 'local', 'remote', 'tutorial', 'ai'
 
         // Timer Configuration (300 seconds = 5 minutes)
         const INITIAL_TIME_IN_SECONDS = 300; 
@@ -275,47 +276,155 @@
             {
                 title: "Lesson 1: Pawn Center Control",
                 text: "Pawns move forward 1 or 2 squares on their first move. Controlling the center squares (d4, e4, d5, e5) gives your pieces room to maneuver.",
-                from: "e2",
-                to: "e4",
+                from: "e2", to: "e4",
                 opponentMove: { from: "e7", to: "e5" },
                 hint: "Try dragging your King's Pawn from e2 to e4."
             },
             {
                 title: "Lesson 2: Developing Knights",
                 text: "Knights move in an 'L' shape and can jump over pieces. Moving knights toward the center early helps control the board.",
-                from: "g1",
-                to: "f3",
+                from: "g1", to: "f3",
                 opponentMove: { from: "b8", to: "c6" },
                 hint: "Move your Knight from g1 to f3 to attack Black's e5 pawn."
             },
             {
                 title: "Lesson 3: Developing Bishops",
                 text: "Bishops control long diagonals. Developing your King's Bishop opens up avenues to attack the enemy King.",
-                from: "f1",
-                to: "c4",
+                from: "f1", to: "c4",
                 opponentMove: { from: "a7", to: "a6" },
                 hint: "Move your Bishop from f1 to c4 to target Black's weak f7 pawn."
             },
             {
                 title: "Lesson 4: Queen Infiltration",
                 text: "Bring your Queen out to join the attack on the weak f7 square.",
-                from: "d1",
-                to: "h5",
+                from: "d1", to: "h5",
                 opponentMove: { from: "d7", to: "d6" },
                 hint: "Move your Queen diagonally from d1 to h5."
             },
             {
                 title: "Lesson 5: Delivering Checkmate!",
                 text: "The weak f7 pawn is defended only by Black's King. Capture it with your Queen to deliver Checkmate!",
-                from: "h5",
-                to: "f7",
-                opponentMove: null, // Checkmate ends the lesson
+                from: "h5", to: "f7",
+                opponentMove: null,
                 hint: "Move your Queen from h5 to f7 to win the game!"
             }
         ];
 
         // Graphic theme URL for piece images
         const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
+
+        /* -------------------------------------------------------------
+           CHESS AI ENGINE (MINIMAX WITH BOARD EVALUATION)
+        ------------------------------------------------------------- */
+        
+        // Base piece values for material calculation
+        const PIECE_VALUES = {
+            'p': 10, 'n': 30, 'b': 30, 'r': 50, 'q': 90, 'k': 900
+        };
+
+        // Positional bonus scores to encourage central control
+        const PAWN_TABLE = [
+            0,  0,  0,  0,  0,  0,  0,  0,
+            5, 10, 10,-20,-20, 10, 10,  5,
+            1,  2,  3,  5,  5,  3,  2,  1,
+            0,  0,  0, 20, 20,  0,  0,  0,
+            1,  1,  2, 10, 10,  2,  1,  1,
+            1, -1, -2,  0,  0, -2, -1,  1,
+            1,  2,  2,-20,-20,  2,  2,  1,
+            0,  0,  0,  0,  0,  0,  0,  0
+        ];
+
+        // Evaluates current board score (positive = good for White, negative = good for Black)
+        function evaluateBoard(boardState) {
+            let totalEvaluation = 0;
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const piece = boardState[row][col];
+                    if (piece) {
+                        const val = PIECE_VALUES[piece.type];
+                        const positionBonus = (piece.type === 'p') ? PAWN_TABLE[row * 8 + col] : 0;
+                        const score = val + positionBonus;
+                        
+                        totalEvaluation += (piece.color === 'w') ? score : -score;
+                    }
+                }
+            }
+            return totalEvaluation;
+        }
+
+        // Minimax recursive decision algorithm
+        function minimax(gameInstance, depth, alpha, beta, isMaximizing) {
+            if (depth === 0 || gameInstance.game_over()) {
+                return evaluateBoard(gameInstance.board());
+            }
+
+            const possibleMoves = gameInstance.moves({ verbose: true });
+
+            if (isMaximizing) {
+                let maxEval = -Infinity;
+                for (let i = 0; i < possibleMoves.length; i++) {
+                    gameInstance.move(possibleMoves[i]);
+                    let evaluation = minimax(gameInstance, depth - 1, alpha, beta, false);
+                    gameInstance.undo();
+                    maxEval = Math.max(maxEval, evaluation);
+                    alpha = Math.max(alpha, evaluation);
+                    if (beta <= alpha) break; // Alpha-Beta Pruning
+                }
+                return maxEval;
+            } else {
+                let minEval = Infinity;
+                for (let i = 0; i < possibleMoves.length; i++) {
+                    gameInstance.move(possibleMoves[i]);
+                    let evaluation = minimax(gameInstance, depth - 1, alpha, beta, true);
+                    gameInstance.undo();
+                    minEval = Math.min(minEval, evaluation);
+                    beta = Math.min(beta, evaluation);
+                    if (beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        // Calculates and executes the best move for the AI (Black)
+        function makeAIMove() {
+            if (game.game_over()) return;
+
+            $('#status').text("Fox AI is thinking...");
+            
+            setTimeout(() => {
+                const possibleMoves = game.moves({ verbose: true });
+                if (possibleMoves.length === 0) return;
+
+                let bestMove = null;
+                let bestValue = Infinity; // AI plays Black, seeking minimum evaluation score
+
+                // Evaluate best move at Depth 2
+                for (let i = 0; i < possibleMoves.length; i++) {
+                    const move = possibleMoves[i];
+                    game.move(move);
+                    let boardValue = minimax(game, 2, -Infinity, Infinity, true);
+                    game.undo();
+
+                    if (boardValue < bestValue) {
+                        bestValue = boardValue;
+                        bestMove = move;
+                    }
+                }
+
+                // Fallback to random move if no best move found
+                if (!bestMove) {
+                    bestMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                }
+
+                game.move(bestMove);
+                board.position(game.fen());
+                updateGameState();
+            }, 350); // Small natural delay
+        }
+
+        /* -------------------------------------------------------------
+           BOARD EVENT HANDLERS
+        ------------------------------------------------------------- */
 
         // Prevents picking up illegal pieces or moving out of turn
         function onDragStart(source, piece, position, orientation) {
@@ -330,8 +439,8 @@
                     (game.turn() === 'b' && playerColor !== 'black')) {
                     return false;
                 }
-            } else if (mode === 'tutorial') {
-                // In tutorial, player only moves White
+            } else if (mode === 'tutorial' || mode === 'ai') {
+                // In AI and Tutorial mode, player controls White
                 if (piece.search(/^b/) !== -1 || game.turn() !== 'w') {
                     return false;
                 }
@@ -340,7 +449,6 @@
 
         // Handles dragging and dropping a piece on a square
         function onDrop(source, target) {
-            // Check move correctness if in Tutorial Mode
             if (mode === 'tutorial') {
                 const currentLesson = tutorialLessons[tutorialStep];
                 if (source !== currentLesson.from || target !== currentLesson.to) {
@@ -363,6 +471,8 @@
                 socket.emit('make_move', { room_code: currentRoom, move: move });
             } else if (mode === 'tutorial') {
                 handleTutorialProgress();
+            } else if (mode === 'ai' && game.turn() === 'b') {
+                makeAIMove();
             }
         }
 
@@ -370,13 +480,32 @@
             board.position(game.fen());
         }
 
-        /* --- Tutorial Logic Handlers --- */
+        /* --- Mode Initialization Handlers --- */
+        function startAIGame() {
+            mode = 'ai';
+            currentRoom = null;
+            $('#tutorialCard').slideUp();
+            game.reset();
+            resetTimers();
+            renderMoveHistory();
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                pieceTheme: PIECE_THEME_URL,
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+            $('#status').text('Playing vs Fox AI. You are White!');
+            startTimer();
+        }
+
         function startTutorialMode() {
             mode = 'tutorial';
             currentRoom = null;
             tutorialStep = 0;
             
-            stopTimer(); // Timers stay off during tutorial
+            stopTimer();
             $('#whiteTimer').text('White: --:--').removeClass('active');
             $('#blackTimer').text('Black: --:--').removeClass('active');
             
@@ -421,11 +550,10 @@
                     }
                 }, 700);
             } else {
-                // Final Checkmate Lesson completed
                 $('#tutorialCard').css('border-color', '#4CAF50');
                 $('#lessonTitle').text("🎉 Tutorial Completed!");
                 $('#lessonText').text("Congratulations! You've learned how to develop your pieces and execute a classic checkmate sequence.");
-                $('#tutorialHint').text("Ready to play? Select Pass-and-Play or Remote Room above!");
+                $('#tutorialHint').text("Ready to play? Select Play vs AI or Pass-and-Play above!");
                 $('#status').text("Checkmate! Tutorial completed successfully.");
             }
         }
@@ -624,8 +752,8 @@
             alert(data.message);
         });
 
-        // Initialize local board on load
-        startLocalGame();
+        // Initialize AI Game mode as default on initial page load
+        startAIGame();
     </script>
 </body>
 </html>
