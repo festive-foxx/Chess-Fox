@@ -32,6 +32,7 @@
             display: flex;
             gap: 10px;
             margin-bottom: 12px;
+            align-items: center;
         }
 
         button {
@@ -71,7 +72,8 @@
             background-color: #2d3748;
         }
 
-        input {
+        /* Styled Dropdown for AI Difficulty Selector */
+        select, input {
             padding: 10px 14px;
             font-size: 14px;
             border-radius: 6px;
@@ -79,6 +81,11 @@
             background-color: #2a2a36;
             color: #ffffff;
             outline: none;
+            cursor: pointer;
+        }
+
+        select:focus, input:focus {
+            border-color: #ff6b35;
         }
 
         /* Ongoing Games Lobby Styling */
@@ -204,8 +211,14 @@
 
     <h1>Fox Chess</h1>
 
+    <!-- Mode Selection & Difficulty Controls -->
     <div class="controls">
         <button onclick="startAIGame()">Play vs AI</button>
+        <select id="aiDifficulty" onchange="updateDifficultyLabel()">
+            <option value="easy">Difficulty: Easy</option>
+            <option value="medium" selected>Difficulty: Medium</option>
+            <option value="hard">Difficulty: Hard</option>
+        </select>
         <button class="secondary" onclick="startLocalGame()">Pass-and-Play (Local)</button>
         <button class="secondary" onclick="createRoom()">Create Remote Room</button>
     </div>
@@ -258,6 +271,127 @@
 
         const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
 
+        /* -------------------------------------------------------------
+           CHESS AI ENGINE (MINIMAX WITH VARIABLE DIFFICULTY)
+        ------------------------------------------------------------- */
+        
+        const PIECE_VALUES = {
+            'p': 10, 'n': 30, 'b': 30, 'r': 50, 'q': 90, 'k': 900
+        };
+
+        const PAWN_TABLE = [
+            0,  0,  0,  0,  0,  0,  0,  0,
+            5, 10, 10,-20,-20, 10, 10,  5,
+            1,  2,  3,  5,  5,  3,  2,  1,
+            0,  0,  0, 20, 20,  0,  0,  0,
+            1,  1,  2, 10, 10,  2,  1,  1,
+            1, -1, -2,  0,  0, -2, -1,  1,
+            1,  2,  2,-20,-20,  2,  2,  1,
+            0,  0,  0,  0,  0,  0,  0,  0
+        ];
+
+        function evaluateBoard(boardState) {
+            let totalEvaluation = 0;
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const piece = boardState[row][col];
+                    if (piece) {
+                        const val = PIECE_VALUES[piece.type];
+                        const positionBonus = (piece.type === 'p') ? PAWN_TABLE[row * 8 + col] : 0;
+                        const score = val + positionBonus;
+                        totalEvaluation += (piece.color === 'w') ? score : -score;
+                    }
+                }
+            }
+            return totalEvaluation;
+        }
+
+        function minimax(gameInstance, depth, alpha, beta, isMaximizing) {
+            if (depth === 0 || gameInstance.game_over()) {
+                return evaluateBoard(gameInstance.board());
+            }
+
+            const possibleMoves = gameInstance.moves({ verbose: true });
+
+            if (isMaximizing) {
+                let maxEval = -Infinity;
+                for (let i = 0; i < possibleMoves.length; i++) {
+                    gameInstance.move(possibleMoves[i]);
+                    let evaluation = minimax(gameInstance, depth - 1, alpha, beta, false);
+                    gameInstance.undo();
+                    maxEval = Math.max(maxEval, evaluation);
+                    alpha = Math.max(alpha, evaluation);
+                    if (beta <= alpha) break;
+                }
+                return maxEval;
+            } else {
+                let minEval = Infinity;
+                for (let i = 0; i < possibleMoves.length; i++) {
+                    gameInstance.move(possibleMoves[i]);
+                    let evaluation = minimax(gameInstance, depth - 1, alpha, beta, true);
+                    gameInstance.undo();
+                    minEval = Math.min(minEval, evaluation);
+                    beta = Math.min(beta, evaluation);
+                    if (beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        function makeAIMove() {
+            if (game.game_over()) return;
+
+            const difficulty = $('#aiDifficulty').val();
+            $('#status').text(`Fox AI (${difficulty.toUpperCase()}) is thinking...`);
+
+            setTimeout(() => {
+                const possibleMoves = game.moves({ verbose: true });
+                if (possibleMoves.length === 0) return;
+
+                let selectedMove = null;
+
+                // Easy Mode: 30% chance to make a completely random move
+                if (difficulty === 'easy' && Math.random() < 0.3) {
+                    selectedMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                } else {
+                    // Determine calculation depth based on difficulty
+                    let searchDepth = 2; // Default Medium
+                    if (difficulty === 'easy') searchDepth = 1;
+                    if (difficulty === 'hard') searchDepth = 3;
+
+                    let bestValue = Infinity; // AI plays Black, seeking minimum score
+
+                    for (let i = 0; i < possibleMoves.length; i++) {
+                        const move = possibleMoves[i];
+                        game.move(move);
+                        let boardValue = minimax(game, searchDepth - 1, -Infinity, Infinity, true);
+                        game.undo();
+
+                        if (boardValue < bestValue) {
+                            bestValue = boardValue;
+                            selectedMove = move;
+                        }
+                    }
+                }
+
+                // Fallback to random move if no move was calculated
+                if (!selectedMove) {
+                    selectedMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                }
+
+                game.move(selectedMove);
+                board.position(game.fen());
+                updateGameState();
+            }, 350);
+        }
+
+        function updateDifficultyLabel() {
+            if (mode === 'ai') {
+                const level = $('#aiDifficulty').val().toUpperCase();
+                $('#status').text(`Playing vs Fox AI (${level}). You are White!`);
+            }
+        }
+
         /* --- Drag and Drop Restrictions --- */
         function onDragStart(source, piece, position, orientation) {
             if (game.game_over() || mode === 'spectator') return false;
@@ -296,22 +430,6 @@
 
         function onSnapEnd() {
             board.position(game.fen());
-        }
-
-        /* --- AI Logic --- */
-        function makeAIMove() {
-            if (game.game_over()) return;
-            $('#status').text("Fox AI is thinking...");
-            
-            setTimeout(() => {
-                const possibleMoves = game.moves();
-                if (possibleMoves.length === 0) return;
-                
-                const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-                game.move(randomMove);
-                board.position(game.fen());
-                updateGameState();
-            }, 350);
         }
 
         /* --- Lobby & Spectator Handlers --- */
@@ -354,7 +472,7 @@
             resetTimers();
 
             board = Chessboard('board', {
-                draggable: false, // Spectators cannot move pieces
+                draggable: false,
                 position: data.fen,
                 pieceTheme: PIECE_THEME_URL
             });
@@ -481,7 +599,8 @@
                 onDrop: onDrop,
                 onSnapEnd: onSnapEnd
             });
-            $('#status').text('Playing vs Fox AI. You are White!');
+            const level = $('#aiDifficulty').val().toUpperCase();
+            $('#status').text(`Playing vs Fox AI (${level}). You are White!`);
             startTimer();
         }
 
