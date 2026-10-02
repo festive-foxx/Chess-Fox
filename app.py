@@ -7,7 +7,7 @@ import chess
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'fox-chess-secret-key-123'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # In-memory data stores
 rooms = {}  # Format: { room_code: { 'board': chess.Board(), 'players': [], 'spectators': [], 'last_activity': timestamp } }
