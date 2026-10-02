@@ -289,5 +289,12 @@ def handle_make_move(data):
     emit('move_made', {'move': move_data, 'fen': board.fen()}, room=room_code, include_self=False)
 
 
+import os
+
 if __name__ == '__main__':
-    socketio.run(app, debug=True, port=5000)
+    # Render assigns a dynamic port via the PORT environment variable.
+    # We default to 5000 for local testing.
+    port = int(os.environ.get('PORT', 5000))
+    
+    # host='0.0.0.0' allows external web traffic from Render's load balancer
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
