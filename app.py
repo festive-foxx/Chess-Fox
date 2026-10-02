@@ -1,145 +1,193 @@
-import os
+import sqlite3
+from flask import Flask, render_template, request, jsonify, session
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from werkzeug.security import generate_password_hash, check_password_hash
 import random
 import string
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, join_room, leave_room, emit
 
-# Initialize Flask application
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'fox_chess_secret_key_123'
-
-# SocketIO setup with CORS enabled
+app.secret_key = 'foxchess_secret_key_change_in_production'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# In-memory database storing room state
-# Structure: { room_code: { 'players': [sid_white, sid_black], 'spectators': [sid1, ...], 'fen': str, 'history': list, 'status': str } }
+DATABASE = 'database.db'
+
+# --- DATABASE SETUP ---
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                wins INTEGER DEFAULT 0,
+                losses INTEGER DEFAULT 0,
+                draws INTEGER DEFAULT 0
+            )
+        ''')
+        conn.commit()
+
+init_db()
+
+# --- MULTIPLAYER ROOM STORAGE ---
 rooms = {}
 
-def generate_room_code(length=6):
-    """Generates a unique 6-character uppercase room code (e.g., 'FX89A2')."""
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+def generate_room_code():
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-def get_public_games():
-    """Formats room data into a clean list for the public lobby UI."""
-    public_list = []
+def get_public_room_list():
+    room_list = []
     for code, room in rooms.items():
-        public_list.append({
+        room_list.append({
             'code': code,
             'player_count': len(room['players']),
             'spectator_count': len(room['spectators']),
-            'status': room['status']
+            'status': 'In Progress' if len(room['players']) == 2 else 'Waiting for opponent'
         })
-    return public_list
+    return room_list
 
-def broadcast_game_list():
-    """Broadcasts the latest room directory to all connected socket clients."""
-    socketio.emit('game_list_updated', get_public_games())
-
+# --- HTTP ROUTES ---
 @app.route('/')
 def index():
-    """Serves the main Fox Chess web interface."""
     return render_template('index.html')
 
+# --- ACCOUNT & STATS ENDPOINTS ---
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+
+    if not username or not password:
+        return jsonify({'success': False, 'message': 'Username and password required.'}), 400
+
+    try:
+        hashed_pw = generate_password_hash(password)
+        with get_db() as conn:
+            conn.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', (username, hashed_pw))
+            conn.commit()
+        return jsonify({'success': True, 'message': 'Account created! You can now log in.'})
+    except sqlite3.IntegrityError:
+        return jsonify({'success': False, 'message': 'Username already taken.'}), 400
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+
+    with get_db() as conn:
+        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+
+    if user and check_password_hash(user['password_hash'], password):
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user['id'],
+                'username': user['username'],
+                'wins': user['wins'],
+                'losses': user['losses'],
+                'draws': user['draws']
+            }
+        })
+    return jsonify({'success': False, 'message': 'Invalid username or password.'}), 401
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/api/user_info', methods=['GET'])
+def user_info():
+    if 'user_id' not in session:
+        return jsonify({'logged_in': False})
+
+    with get_db() as conn:
+        user = conn.execute('SELECT id, username, wins, losses, draws FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+
+    if user:
+        return jsonify({
+            'logged_in': True,
+            'user': dict(user)
+        })
+    return jsonify({'logged_in': False})
+
+@app.route('/api/record_result', methods=['POST'])
+def record_result():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'Not logged in.'}), 401
+
+    data = request.get_json() or {}
+    result = data.get('result') # 'win', 'loss', or 'draw'
+
+    if result not in ['win', 'loss', 'draw']:
+        return jsonify({'success': False, 'message': 'Invalid result type.'}), 400
+
+    col = 'wins' if result == 'win' else ('losses' if result == 'loss' else 'draws')
+
+    with get_db() as conn:
+        conn.execute(f'UPDATE users SET {col} = {col} + 1 WHERE id = ?', (session['user_id'],))
+        conn.commit()
+
+    return jsonify({'success': True})
+
+# --- SOCKET.IO EVENTS ---
 @socketio.on('connect')
 def handle_connect():
-    """Sends the current active games list as soon as a client connects."""
-    emit('game_list_updated', get_public_games())
+    emit('game_list_updated', get_public_room_list())
 
 @socketio.on('create_room')
 def handle_create_room():
-    """Handles creating a new multiplayer room."""
     room_code = generate_room_code()
-    join_room(room_code)
-    
     rooms[room_code] = {
-        'players': [request.sid],
+        'players': {request.sid: 'white'},
         'spectators': [],
-        'fen': 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-        'history': [],
-        'status': 'Waiting for Player 2'
+        'fen': 'start'
     }
-    
+    join_room(room_code)
     emit('room_created', {'room_code': room_code, 'color': 'white'})
-    broadcast_game_list()
+    socketio.emit('game_list_updated', get_public_room_list())
 
 @socketio.on('join_room')
 def handle_join_room(data):
-    """Handles Player 2 joining an existing match room."""
-    room_code = data.get('room_code', '').strip().upper()
-    
-    if room_code not in rooms:
-        emit('error_message', {'message': 'Room code does not exist.'})
-        return
-
-    if len(rooms[room_code]['players']) >= 2:
-        emit('error_message', {'message': 'Room is full. Try spectating instead!'})
-        return
-
-    join_room(room_code)
-    rooms[room_code]['players'].append(request.sid)
-    rooms[room_code]['status'] = 'In Progress'
-    
-    emit('player_joined', {'room_code': room_code, 'color': 'black'}, room=request.sid)
-    emit('game_start', {'message': 'Game started! White to move.'}, room=room_code)
-    broadcast_game_list()
+    room_code = data.get('room_code')
+    if room_code in rooms:
+        room = rooms[room_code]
+        if len(room['players']) < 2:
+            room['players'][request.sid] = 'black'
+            join_room(room_code)
+            emit('player_joined', {'room_code': room_code, 'color': 'black'})
+            socketio.to(room_code).emit('game_start', {'message': 'Both players connected! Match started.'})
+            socketio.emit('game_list_updated', get_public_room_list())
+        else:
+            emit('error_message', {'message': 'Room is full! You can spectate instead.'})
+    else:
+        emit('error_message', {'message': 'Room does not exist.'})
 
 @socketio.on('spectate_room')
 def handle_spectate_room(data):
-    """Allows users to watch an active match as a spectator."""
-    room_code = data.get('room_code', '').strip().upper()
-
-    if room_code not in rooms:
-        emit('error_message', {'message': 'Match no longer exists.'})
-        return
-
-    join_room(room_code)
-    rooms[room_code]['spectators'].append(request.sid)
-
-    # Emit current state so spectator instantly syncs with current board
-    emit('spectate_joined', {
-        'room_code': room_code,
-        'fen': rooms[room_code]['fen'],
-        'history': rooms[room_code]['history'],
-        'status': rooms[room_code]['status']
-    }, room=request.sid)
-
-    broadcast_game_list()
+    room_code = data.get('room_code')
+    if room_code in rooms:
+        join_room(room_code)
+        rooms[room_code]['spectators'].append(request.sid)
+        emit('spectate_joined', {
+            'room_code': room_code,
+            'fen': rooms[room_code]['fen']
+        })
+        socketio.emit('game_list_updated', get_public_room_list())
 
 @socketio.on('make_move')
 def handle_make_move(data):
-    """Relays move details and updates room state for players & spectators."""
     room_code = data.get('room_code')
-    move = data.get('move')
-    fen = data.get('fen')
-
     if room_code in rooms:
-        rooms[room_code]['fen'] = fen
-        if move:
-            rooms[room_code]['history'].append(move)
-
-        # Broadcast move to both opponent and all spectators in the room
-        emit('move_made', {'move': move, 'fen': fen}, room=room_code, include_self=False)
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Cleans up empty rooms when players or spectators disconnect."""
-    sid = request.sid
-    rooms_to_delete = []
-
-    for code, room in rooms.items():
-        if sid in room['players']:
-            room['players'].remove(sid)
-            emit('error_message', {'message': 'A player disconnected.'}, room=code)
-            if len(room['players']) == 0:
-                rooms_to_delete.append(code)
-        elif sid in room['spectators']:
-            room['spectators'].remove(sid)
-
-    for code in rooms_to_delete:
-        del rooms[code]
-
-    broadcast_game_list()
+        rooms[room_code]['fen'] = data.get('fen')
+        emit('move_made', data, to=room_code, include_self=False)
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=True)
+    socketio.run(app, debug=True)

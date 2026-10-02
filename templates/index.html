@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fox Chess</title>
-    <!-- Stylesheet for Chessboard graphics -->
     <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
     <style>
         body {
@@ -21,11 +20,38 @@
 
         h1 {
             color: #ff6b35;
-            margin-top: 10px;
-            margin-bottom: 20px;
+            margin-top: 5px;
+            margin-bottom: 15px;
             font-size: 2.2rem;
             letter-spacing: 1px;
             text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        /* User Account Bar Styling */
+        .account-bar {
+            width: 620px;
+            background-color: #2a2a36;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+            box-sizing: border-box;
+        }
+
+        .account-auth-inputs {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .user-stats-badge {
+            color: #ffaa5b;
+            font-weight: bold;
+            font-size: 14px;
         }
 
         .controls {
@@ -68,27 +94,20 @@
             font-size: 12px;
         }
 
-        button.spectate-btn:hover {
-            background-color: #2d3748;
-        }
-
-        /* Styled Dropdown for AI Difficulty Selector */
         select, input {
-            padding: 10px 14px;
+            padding: 8px 12px;
             font-size: 14px;
             border-radius: 6px;
             border: 1px solid #444;
             background-color: #2a2a36;
             color: #ffffff;
             outline: none;
-            cursor: pointer;
         }
 
         select:focus, input:focus {
             border-color: #ff6b35;
         }
 
-        /* Ongoing Games Lobby Styling */
         #lobbyCard {
             width: 620px;
             background-color: #2a2a36;
@@ -211,7 +230,21 @@
 
     <h1>Fox Chess</h1>
 
-    <!-- Mode Selection & Difficulty Controls -->
+    <!-- User Account Header Bar -->
+    <div class="account-bar" id="accountBar">
+        <div id="authLoggedOut" class="account-auth-inputs">
+            <input type="text" id="authUsername" placeholder="Username" style="width: 110px;">
+            <input type="password" id="authPassword" placeholder="Password" style="width: 110px;">
+            <button onclick="loginUser()">Log In</button>
+            <button class="secondary" onclick="registerUser()">Register</button>
+        </div>
+        <div id="authLoggedIn" style="display: none; width: 100%; justify-content: space-between; align-items: center;">
+            <span class="user-stats-badge" id="userBadge">Welcome, Player!</span>
+            <button class="secondary" onclick="logoutUser()">Log Out</button>
+        </div>
+    </div>
+
+    <!-- Mode & Difficulty Controls -->
     <div class="controls">
         <button onclick="startAIGame()">Play vs AI</button>
         <select id="aiDifficulty" onchange="updateDifficultyLabel()">
@@ -263,6 +296,8 @@
         let playerColor = 'white';
         let currentRoom = null;
         let mode = 'ai'; // 'local', 'remote', 'ai', 'spectator'
+        let currentUser = null;
+        let hasRecordedResult = false;
 
         const INITIAL_TIME_IN_SECONDS = 300; 
         let whiteTime = INITIAL_TIME_IN_SECONDS;
@@ -272,12 +307,101 @@
         const PIECE_THEME_URL = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
 
         /* -------------------------------------------------------------
+           ACCOUNT MANAGEMENT & STATS
+        ------------------------------------------------------------- */
+        function checkAuthStatus() {
+            $.get('/api/user_info', function(res) {
+                if (res.logged_in) {
+                    currentUser = res.user;
+                    renderUserUI();
+                } else {
+                    currentUser = null;
+                    $('#authLoggedOut').show();
+                    $('#authLoggedIn').hide();
+                }
+            });
+        }
+
+        function renderUserUI() {
+            if (!currentUser) return;
+            $('#authLoggedOut').hide();
+            $('#authLoggedIn').css('display', 'flex');
+            $('#userBadge').html(`
+                👤 <strong>${currentUser.username}</strong> | 
+                <span style="color:#4CAF50;">Wins: ${currentUser.wins}</span> | 
+                <span style="color:#F44336;">Losses: ${currentUser.losses}</span> | 
+                <span style="color:#FFC107;">Draws: ${currentUser.draws}</span>
+            `);
+        }
+
+        function registerUser() {
+            const username = $('#authUsername').val().trim();
+            const password = $('#authPassword').val().trim();
+            if (!username || !password) return alert('Enter username & password.');
+
+            $.ajax({
+                url: '/api/register',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ username, password }),
+                success: function(res) {
+                    alert(res.message);
+                },
+                error: function(err) {
+                    alert(err.responseJSON ? err.responseJSON.message : 'Registration failed.');
+                }
+            });
+        }
+
+        function loginUser() {
+            const username = $('#authUsername').val().trim();
+            const password = $('#authPassword').val().trim();
+            if (!username || !password) return alert('Enter username & password.');
+
+            $.ajax({
+                url: '/api/login',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ username, password }),
+                success: function(res) {
+                    currentUser = res.user;
+                    renderUserUI();
+                },
+                error: function(err) {
+                    alert(err.responseJSON ? err.responseJSON.message : 'Login failed.');
+                }
+            });
+        }
+
+        function logoutUser() {
+            $.post('/api/logout', function() {
+                currentUser = null;
+                $('#authLoggedOut').show();
+                $('#authLoggedIn').hide();
+                $('#authUsername').val('');
+                $('#authPassword').val('');
+            });
+        }
+
+        function recordMatchResult(result) {
+            if (!currentUser || hasRecordedResult) return;
+            hasRecordedResult = true;
+
+            $.ajax({
+                url: '/api/record_result',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ result: result }),
+                success: function() {
+                    checkAuthStatus(); // Refresh user stats on UI
+                }
+            });
+        }
+
+        /* -------------------------------------------------------------
            CHESS AI ENGINE (MINIMAX WITH VARIABLE DIFFICULTY)
         ------------------------------------------------------------- */
-        
-        const PIECE_VALUES = {
-            'p': 10, 'n': 30, 'b': 30, 'r': 50, 'q': 90, 'k': 900
-        };
+        const PIECE_VALUES = { 'p': 10, 'n': 30, 'b': 30, 'r': 50, 'q': 90, 'k': 900 };
 
         const PAWN_TABLE = [
             0,  0,  0,  0,  0,  0,  0,  0,
@@ -350,16 +474,14 @@
 
                 let selectedMove = null;
 
-                // Easy Mode: 30% chance to make a completely random move
                 if (difficulty === 'easy' && Math.random() < 0.3) {
                     selectedMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
                 } else {
-                    // Determine calculation depth based on difficulty
-                    let searchDepth = 2; // Default Medium
+                    let searchDepth = 2;
                     if (difficulty === 'easy') searchDepth = 1;
                     if (difficulty === 'hard') searchDepth = 3;
 
-                    let bestValue = Infinity; // AI plays Black, seeking minimum score
+                    let bestValue = Infinity;
 
                     for (let i = 0; i < possibleMoves.length; i++) {
                         const move = possibleMoves[i];
@@ -374,7 +496,6 @@
                     }
                 }
 
-                // Fallback to random move if no move was calculated
                 if (!selectedMove) {
                     selectedMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
                 }
@@ -496,9 +617,23 @@
             if (game.in_checkmate()) {
                 statusText = 'Game over! ' + moveColor + ' is in checkmate.';
                 stopTimer();
+
+                // Determine win/loss for logged in player
+                if (mode === 'ai') {
+                    if (game.turn() === 'b') recordMatchResult('win'); // Black is in checkmate -> White wins
+                    else recordMatchResult('loss'); // White is in checkmate -> AI wins
+                } else if (mode === 'remote') {
+                    if ((playerColor === 'white' && game.turn() === 'b') || 
+                        (playerColor === 'black' && game.turn() === 'w')) {
+                        recordMatchResult('win');
+                    } else {
+                        recordMatchResult('loss');
+                    }
+                }
             } else if (game.in_draw()) {
                 statusText = 'Game over! Stalemate / Draw.';
                 stopTimer();
+                if (mode === 'ai' || mode === 'remote') recordMatchResult('draw');
             } else {
                 statusText = (mode === 'spectator' ? 'Spectating: ' : '') + moveColor + ' to move.';
                 if (game.in_check()) statusText += ' (' + moveColor + ' is in check)';
@@ -557,6 +692,7 @@
                         whiteTime = 0;
                         stopTimer();
                         $('#status').text('Game Over! Black wins on time.');
+                        if (mode === 'ai') recordMatchResult('loss');
                     }
                 } else {
                     blackTime--;
@@ -564,6 +700,7 @@
                         blackTime = 0;
                         stopTimer();
                         $('#status').text('Game Over! White wins on time.');
+                        if (mode === 'ai') recordMatchResult('win');
                     }
                 }
                 updateTimerDisplay();
@@ -588,6 +725,7 @@
         function startAIGame() {
             mode = 'ai';
             currentRoom = null;
+            hasRecordedResult = false;
             game.reset();
             resetTimers();
             renderMoveHistory();
@@ -607,6 +745,7 @@
         function startLocalGame() {
             mode = 'local';
             currentRoom = null;
+            hasRecordedResult = false;
             game.reset();
             resetTimers();
             renderMoveHistory();
@@ -624,6 +763,7 @@
 
         function createRoom() {
             mode = 'remote';
+            hasRecordedResult = false;
             socket.emit('create_room');
         }
 
@@ -631,6 +771,7 @@
             const roomCode = $('#roomInput').val().trim();
             if (roomCode.length === 0) return alert('Please enter a room code.');
             mode = 'remote';
+            hasRecordedResult = false;
             socket.emit('join_room', { room_code: roomCode });
         }
 
@@ -690,6 +831,8 @@
             alert(data.message);
         });
 
+        // Initialize user session check and start default AI match
+        checkAuthStatus();
         startAIGame();
     </script>
 </body>
