@@ -41,6 +41,53 @@ def get_public_game_list():
     return game_list
 
 
+def get_room_state(room_code):
+    """Returns a compact public snapshot of the room state for the frontend."""
+    room = rooms.get(room_code)
+    if room is None:
+        return None
+
+    board = room['board']
+    return {
+        'room_code': room_code,
+        'fen': board.fen(),
+        'turn': 'white' if board.turn == chess.WHITE else 'black',
+        'game_over': board.is_game_over(),
+        'in_check': board.is_check(),
+        'status_message': get_game_status_message(room_code)
+    }
+
+
+def get_game_status_message(room_code):
+    """Human-readable chess status for the current room."""
+    room = rooms.get(room_code)
+    if room is None:
+        return 'Room no longer exists.'
+
+    board = room['board']
+    if board.is_checkmate():
+        winner = 'black' if board.turn == chess.WHITE else 'white'
+        return f'Checkmate — {winner} wins.'
+    if board.is_stalemate():
+        return 'Stalemate — draw.'
+    if board.is_insufficient_material():
+        return 'Draw by insufficient material.'
+    if board.is_seventyfive_moves():
+        return 'Draw by the 75-move rule.'
+    if board.is_fivefold_repetition():
+        return 'Draw by repetition.'
+    if board.is_check():
+        return f'Check — {"white" if board.turn == chess.WHITE else "black"} to move.'
+    return f'{"white" if board.turn == chess.WHITE else "black"} to move.'
+
+
+def emit_room_state(room_code):
+    """Broadcasts the latest room snapshot to all room participants."""
+    state = get_room_state(room_code)
+    if state is not None:
+        socketio.emit('room_state', state, room=room_code)
+
+
 def remove_socket_from_room(sid, room_code=None):
     """Removes a socket from its room and clears empty rooms."""
     if room_code is None:
@@ -199,6 +246,7 @@ def handle_create_room():
     join_room(room_code)
 
     emit('room_created', {'room_code': room_code, 'color': 'white'}, room=request.sid)
+    emit_room_state(room_code)
     socketio.emit('game_list_updated', get_public_game_list())
 
 
@@ -224,6 +272,7 @@ def handle_join_room(data):
 
     emit('player_joined', {'room_code': room_code, 'color': 'black'}, room=request.sid)
     socketio.emit('game_start', {'message': f'Player 2 joined room {room_code}. Game started!'}, room=room_code)
+    emit_room_state(room_code)
     socketio.emit('game_list_updated', get_public_game_list())
 
 
@@ -267,7 +316,11 @@ def handle_make_move(data):
         return
 
     board = room['board']
-    expected_turn = 'w' if player_color == 'white' else 'b'
+    if board.is_game_over():
+        emit('error_message', {'message': 'Game is already over.'}, room=request.sid)
+        return
+
+    expected_turn = chess.WHITE if player_color == 'white' else chess.BLACK
     if board.turn != expected_turn:
         emit('error_message', {'message': "It's not your turn."}, room=request.sid)
         return
@@ -282,10 +335,15 @@ def handle_make_move(data):
         emit('error_message', {'message': 'Move is missing target squares.'}, room=request.sid)
         return
 
+    promotion = move_data.get('promotion')
+    if promotion is not None and str(promotion) not in {'q', 'r', 'b', 'n'}:
+        emit('error_message', {'message': 'Invalid promotion choice.'}, room=request.sid)
+        return
+
     try:
         uci = f"{from_square}{to_square}"
-        if move_data.get('promotion'):
-            uci += str(move_data.get('promotion'))
+        if promotion:
+            uci += str(promotion)
         move = chess.Move.from_uci(uci)
         if move not in board.legal_moves:
             raise ValueError
@@ -297,7 +355,15 @@ def handle_make_move(data):
     room['last_activity'] = time.time()
     room['game_over'] = board.is_game_over()
 
+    if board.is_game_over():
+        emit('game_over', {
+            'room_code': room_code,
+            'message': get_game_status_message(room_code),
+            'winner': 'white' if board.turn == chess.BLACK else 'black'
+        }, room=room_code)
+
     emit('move_made', {'move': move_data, 'fen': board.fen()}, room=room_code, include_self=False)
+    emit_room_state(room_code)
 
 
 import os

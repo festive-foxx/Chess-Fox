@@ -1083,6 +1083,25 @@
             startTimer();
         });
 
+        socket.on('room_state', (state) => {
+            if (!state || !state.fen) return;
+            if (mode === 'remote' || mode === 'spectator') {
+                game.load(state.fen);
+                board.position(state.fen);
+                updateStatusText();
+                renderMoveHistory();
+                if (state.game_over) {
+                    stopTimer();
+                    $('#status').text(state.status_message || 'Game over.');
+                }
+            }
+        });
+
+        socket.on('game_over', (data) => {
+            stopTimer();
+            $('#status').text(data.message || 'Game over.');
+        });
+
         socket.on('move_made', (data) => {
             if (data.fen) {
                 game.load(data.fen);
