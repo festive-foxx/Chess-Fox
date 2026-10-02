@@ -236,6 +236,82 @@
             color: #ffaa5b;
         }
 
+        .info-box {
+            width: 620px;
+            background: #2a2a36;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+        }
+
+        #roomInfo {
+            color: #e0e0e0;
+            min-height: 38px;
+            font-size: 14px;
+        }
+
+        .chat-panel {
+            width: 620px;
+            background: #2a2a36;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+        }
+
+        .chat-panel h3 {
+            margin-top: 0;
+            color: #ffaa5b;
+            font-size: 16px;
+        }
+
+        #chatMessages {
+            height: 140px;
+            overflow-y: auto;
+            background: #1a1a24;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .chat-message {
+            margin-bottom: 6px;
+        }
+
+        .chat-message strong {
+            color: #ffaa5b;
+        }
+
+        .match-history-box {
+            width: 620px;
+            background: #2a2a36;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+        }
+
+        .match-history-box h3 {
+            margin-top: 0;
+            color: #ffaa5b;
+            font-size: 16px;
+        }
+
+        #recentMatches {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 13px;
+            color: #d0d0d0;
+        }
+
         /* -------------------------------------------------------------
            RULES & INSTRUCTIONS MODAL STYLES
         ------------------------------------------------------------- */
@@ -404,14 +480,39 @@
     </div>
 
     <div class="controls">
-        <input type="text" id="roomInput" placeholder="Enter 6-char Code">
+        <input type="text" id="roomName" placeholder="Optional room name" style="width: 150px;">
+        <input type="password" id="roomPassword" placeholder="Private password" style="width: 150px;">
+        <input type="text" id="roomInput" placeholder="Enter 6-char Code" style="width: 140px;">
+        <button class="secondary" onclick="createRoom()">Create Room</button>
         <button class="secondary" onclick="joinRoom()">Join Room</button>
+        <button class="secondary" id="rematchBtn" onclick="requestRematch()" style="display:none;">Rematch</button>
+        <button class="secondary" id="leaveRoomBtn" onclick="leaveCurrentRoom()" style="display:none;">Leave Room</button>
     </div>
+
+    <div class="controls">
+        <input type="text" id="lobbyFilter" placeholder="Filter lobby by room name or code" style="width: 300px;">
+    </div>
+
+    <div id="roomInfo" class="info-box">No room selected.</div>
 
     <!-- Active Matches Lobby -->
     <div id="lobbyCard">
         <h3>Ongoing & Waiting Matches</h3>
         <div id="gameList">No active matches online. Create one to begin!</div>
+    </div>
+
+    <div class="chat-panel">
+        <h3>Room Chat</h3>
+        <div id="chatMessages">No messages yet.</div>
+        <div class="controls" style="margin-bottom:0; justify-content: flex-start;">
+            <input type="text" id="chatInput" placeholder="Type a message..." style="width: 480px;">
+            <button onclick="sendChatMessage()">Send</button>
+        </div>
+    </div>
+
+    <div class="match-history-box">
+        <h3>Recent Match History</h3>
+        <div id="recentMatches">No matches played yet.</div>
     </div>
 
     <div class="timer-box">
@@ -665,6 +766,35 @@
             });
         }
 
+        function renderRoomInfo(data) {
+            if (!data) {
+                $('#roomInfo').text('No room selected.');
+                return;
+            }
+
+            const playerText = (data.players || []).map(p => `${p.username} (${p.color})`).join(' vs ') || 'Waiting for players';
+            $('#roomInfo').html(`<strong>${data.room_name || 'Room ' + data.room_code}</strong> — ${data.private ? 'Private room' : 'Public room'}<br>Players: ${playerText}`);
+        }
+
+        function renderMatchHistory(matches) {
+            if (!matches || matches.length === 0) {
+                $('#recentMatches').text('No matches played yet.');
+                return;
+            }
+
+            const html = matches.map(match => `
+                <div><strong>${match.white}</strong> vs <strong>${match.black}</strong> — ${match.result}</div>
+            `).join('');
+            $('#recentMatches').html(html);
+        }
+
+        function sendChatMessage() {
+            const message = $('#chatInput').val().trim();
+            if (!message || !currentRoom) return;
+            socket.emit('send_chat_message', { room_code: currentRoom, message: message });
+            $('#chatInput').val('');
+        }
+
         /* -------------------------------------------------------------
            CHESS AI ENGINE (MINIMAX WITH VARIABLE DIFFICULTY)
         ------------------------------------------------------------- */
@@ -822,17 +952,23 @@
 
         /* --- Lobby & Spectator Handlers --- */
         socket.on('game_list_updated', (games) => {
-            if (games.length === 0) {
+            const filterText = $('#lobbyFilter').val().trim().toLowerCase();
+            const visibleGames = games.filter(g => {
+                if (!filterText) return true;
+                return (g.code + ' ' + (g.room_name || '')).toLowerCase().includes(filterText);
+            });
+
+            if (visibleGames.length === 0) {
                 $('#gameList').html('No active matches online. Create one to begin!');
                 return;
             }
 
             let html = '';
-            games.forEach(g => {
+            visibleGames.forEach(g => {
                 const canJoin = g.player_count < 2;
                 html += `
                     <div class="game-item">
-                        <span><strong>Room ${g.code}</strong> - ${g.status} (${g.spectator_count} spectating)</span>
+                        <span><strong>${g.room_name || 'Room ' + g.code}</strong> (${g.code}) - ${g.status} ${g.private ? '| Private' : '| Public'} (${g.spectator_count} spectating)</span>
                         <div class="game-item-actions">
                             ${canJoin ? `<button onclick="quickJoin('${g.code}')">Join as P2</button>` : ''}
                             <button class="spectate-btn" onclick="spectateRoom('${g.code}')">Spectate</button>
@@ -851,7 +987,8 @@
         function spectateRoom(code) {
             mode = 'spectator';
             currentRoom = code;
-            socket.emit('spectate_room', { room_code: code });
+            const password = $('#roomPassword').val().trim();
+            socket.emit('spectate_room', { room_code: code, password: password });
         }
 
         socket.on('spectate_joined', (data) => {
@@ -992,6 +1129,8 @@
             mode = 'ai';
             currentRoom = null;
             hasRecordedResult = false;
+            $('#rematchBtn').hide();
+            $('#leaveRoomBtn').hide();
             game.reset();
             resetTimers();
             renderMoveHistory();
@@ -1012,6 +1151,8 @@
             mode = 'local';
             currentRoom = null;
             hasRecordedResult = false;
+            $('#rematchBtn').hide();
+            $('#leaveRoomBtn').hide();
             game.reset();
             resetTimers();
             renderMoveHistory();
@@ -1030,7 +1171,11 @@
         function createRoom() {
             mode = 'remote';
             hasRecordedResult = false;
-            socket.emit('create_room');
+            const password = $('#roomPassword').val().trim();
+            const roomName = $('#roomName').val().trim();
+            $('#rematchBtn').show();
+            $('#leaveRoomBtn').show();
+            socket.emit('create_room', { room_name: roomName, password: password });
         }
 
         function joinRoom() {
@@ -1038,7 +1183,36 @@
             if (roomCode.length === 0) return alert('Please enter a room code.');
             mode = 'remote';
             hasRecordedResult = false;
-            socket.emit('join_room', { room_code: roomCode });
+            $('#rematchBtn').show();
+            $('#leaveRoomBtn').show();
+            const password = $('#roomPassword').val().trim();
+            socket.emit('join_room', { room_code: roomCode, password: password });
+        }
+
+        function requestRematch() {
+            if (!currentRoom) return;
+            socket.emit('request_rematch', { room_code: currentRoom });
+        }
+
+        function leaveCurrentRoom() {
+            if (!currentRoom) return;
+            socket.emit('leave_room', { room_code: currentRoom });
+            currentRoom = null;
+            mode = 'ai';
+            $('#rematchBtn').hide();
+            $('#leaveRoomBtn').hide();
+            game.reset();
+            resetTimers();
+            renderMoveHistory();
+            board = Chessboard('board', {
+                draggable: true,
+                position: 'start',
+                pieceTheme: PIECE_THEME_URL,
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            });
+            $('#status').text('Left room. You can create or join another match.');
         }
 
         /* --- Socket Listeners --- */
@@ -1083,6 +1257,51 @@
             startTimer();
         });
 
+        socket.on('room_info_updated', (data) => {
+            if (currentRoom === data.room_code || mode === 'spectator') {
+                renderRoomInfo(data);
+            }
+        });
+
+        socket.on('match_history_updated', (matches) => {
+            renderMatchHistory(matches);
+        });
+
+        socket.on('chat_message', (message) => {
+            const box = $('#chatMessages');
+            if (box.text() === 'No messages yet.') box.text('');
+            box.append(`<div class="chat-message"><strong>${message.username}:</strong> ${message.message}</div>`);
+            box.scrollTop(box[0].scrollHeight);
+        });
+
+        socket.on('rematch_started', (data) => {
+            if (!currentRoom) return;
+            $('#status').text(data.message || 'New match started!');
+            resetTimers();
+            renderMoveHistory();
+            game.reset();
+            if (board) {
+                board.position('start');
+            }
+            if (mode === 'remote') {
+                board = Chessboard('board', {
+                    draggable: true,
+                    position: 'start',
+                    orientation: playerColor === 'white' ? 'white' : 'black',
+                    pieceTheme: PIECE_THEME_URL,
+                    onDragStart: onDragStart,
+                    onDrop: onDrop,
+                    onSnapEnd: onSnapEnd
+                });
+            }
+            startTimer();
+        });
+
+        socket.on('player_left', (data) => {
+            $('#status').text(data.message || 'Opponent left the room.');
+            stopTimer();
+        });
+
         socket.on('room_state', (state) => {
             if (!state || !state.fen) return;
             if (mode === 'remote' || mode === 'spectator') {
@@ -1116,8 +1335,17 @@
             alert(data.message);
         });
 
+        $('#chatInput').on('keydown', function(event) {
+            if (event.key === 'Enter') sendChatMessage();
+        });
+
+        $('#lobbyFilter').on('input', function() {
+            socket.emit('game_list_updated', []);
+        });
+
         // Initialize user session check and start default AI match
         checkAuthStatus();
+        renderMatchHistory([]);
         startAIGame();
     </script>
 </body>

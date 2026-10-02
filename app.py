@@ -12,6 +12,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 # In-memory data stores
 rooms = {}  # Format: { room_code: { 'board': chess.Board(), 'players': [], 'spectators': [], 'last_activity': timestamp } }
 users = {}  # Format: { username: { 'password': pw, 'wins': 0, 'losses': 0, 'draws': 0 } }
+recent_matches = []
 
 # -------------------------------------------------------------
 # CONFIGURATION VARIABLES
@@ -36,9 +37,90 @@ def get_public_game_list():
             'code': code,
             'player_count': len(data['players']),
             'spectator_count': len(data.get('spectators', [])),
-            'status': 'Waiting for Player' if len(data['players']) < 2 else 'In Progress'
+            'status': 'Waiting for Player' if len(data['players']) < 2 else 'In Progress',
+            'private': bool(data.get('password')),
+            'room_name': data.get('room_name') or f'Room {code}'
         })
     return game_list
+
+
+def get_session_username():
+    """Gets the current logged-in username from the session if available."""
+    return session.get('username') or 'Guest'
+
+
+def get_player_display_name(sid, room_code=None):
+    """Returns a display name for a socket either from session or a guest fallback."""
+    if room_code and room_code in rooms:
+        room = rooms[room_code]
+        if sid in room.get('player_names', {}):
+            return room['player_names'][sid]
+        if sid in room.get('spectator_names', {}):
+            return room['spectator_names'][sid]
+    return 'Guest'
+
+
+def get_room_player_summary(room_code):
+    """Formats room player info into browser-friendly objects."""
+    room = rooms.get(room_code)
+    if room is None:
+        return []
+
+    players = []
+    for idx, sid in enumerate(room.get('players', [])):
+        players.append({
+            'sid': sid,
+            'username': room.get('player_names', {}).get(sid, f'Player {idx + 1}'),
+            'color': room.get('player_colors', {}).get(sid, 'white' if idx == 0 else 'black')
+        })
+    return players
+
+
+def get_recent_matches():
+    """Returns the recent match result list for the lobby/scoreboard."""
+    return list(recent_matches)[-10:][::-1]
+
+
+def append_match_record(room_code, winner, result_text=None):
+    """Stores a recent match result for public display."""
+    room = rooms.get(room_code)
+    if not room:
+        return
+
+    player_names = room.get('player_names', {})
+    white_name = player_names.get(room['players'][0], 'White') if len(room['players']) > 0 else 'White'
+    black_name = player_names.get(room['players'][1], 'Black') if len(room['players']) > 1 else 'Black'
+
+    record = {
+        'room_code': room_code,
+        'white': white_name,
+        'black': black_name,
+        'winner': winner,
+        'result': result_text or winner,
+        'timestamp': time.strftime('%H:%M:%S')
+    }
+    recent_matches.append(record)
+    if len(recent_matches) > 25:
+        recent_matches.pop(0)
+
+    socketio.emit('match_history_updated', get_recent_matches())
+
+
+def emit_room_state(room_code):
+    """Broadcasts the latest room snapshot to all room participants."""
+    state = get_room_state(room_code)
+    if state is not None:
+        socketio.emit('room_state', state, room=room_code)
+
+    room = rooms.get(room_code)
+    if room is not None:
+        socketio.emit('room_info_updated', {
+            'room_code': room_code,
+            'players': get_room_player_summary(room_code),
+            'spectators': list(room.get('spectator_names', {}).values()),
+            'private': bool(room.get('password')),
+            'room_name': room.get('room_name') or f'Room {room_code}'
+        }, room=room_code)
 
 
 def get_room_state(room_code):
@@ -79,13 +161,6 @@ def get_game_status_message(room_code):
     if board.is_check():
         return f'Check — {"white" if board.turn == chess.WHITE else "black"} to move.'
     return f'{"white" if board.turn == chess.WHITE else "black"} to move.'
-
-
-def emit_room_state(room_code):
-    """Broadcasts the latest room snapshot to all room participants."""
-    state = get_room_state(room_code)
-    if state is not None:
-        socketio.emit('room_state', state, room=room_code)
 
 
 def remove_socket_from_room(sid, room_code=None):
@@ -233,21 +308,30 @@ def handle_disconnect():
 
 
 @socketio.on('create_room')
-def handle_create_room():
+def handle_create_room(data=None):
     room_code = generate_room_code()
+    password = (data or {}).get('password', '')
+    room_name = (data or {}).get('room_name', '').strip() or f'Room {room_code}'
+    username = session.get('username') or 'Guest'
+
     rooms[room_code] = {
         'board': chess.Board(),
         'players': [request.sid],
         'player_colors': {request.sid: 'white'},
+        'player_names': {request.sid: username},
         'spectators': [],
+        'spectator_names': {},
+        'password': password,
+        'room_name': room_name,
         'last_activity': time.time(),
         'game_over': False
     }
     join_room(room_code)
 
-    emit('room_created', {'room_code': room_code, 'color': 'white'}, room=request.sid)
+    emit('room_created', {'room_code': room_code, 'color': 'white', 'room_name': room_name, 'players': get_room_player_summary(room_code)}, room=request.sid)
     emit_room_state(room_code)
     socketio.emit('game_list_updated', get_public_game_list())
+    socketio.emit('match_history_updated', get_recent_matches())
 
 
 @socketio.on('join_room')
@@ -258,6 +342,11 @@ def handle_join_room(data):
         return
 
     room = rooms[room_code]
+    password = (data or {}).get('password', '')
+    if room.get('password') and password != room.get('password'):
+        emit('error_message', {'message': 'Incorrect room password.'})
+        return
+
     if request.sid in room.get('players', []) or request.sid in room.get('spectators', []):
         return
 
@@ -265,12 +354,14 @@ def handle_join_room(data):
         emit('error_message', {'message': 'Room is full! You can spectate instead.'})
         return
 
+    username = session.get('username') or 'Guest'
     room['players'].append(request.sid)
     room['player_colors'][request.sid] = 'black'
+    room['player_names'][request.sid] = username
     room['last_activity'] = time.time()
     join_room(room_code)
 
-    emit('player_joined', {'room_code': room_code, 'color': 'black'}, room=request.sid)
+    emit('player_joined', {'room_code': room_code, 'color': 'black', 'players': get_room_player_summary(room_code)}, room=request.sid)
     socketio.emit('game_start', {'message': f'Player 2 joined room {room_code}. Game started!'}, room=room_code)
     emit_room_state(room_code)
     socketio.emit('game_list_updated', get_public_game_list())
@@ -284,17 +375,102 @@ def handle_spectate_room(data):
         return
 
     room = rooms[room_code]
+    password = (data or {}).get('password', '')
+    if room.get('password') and password != room.get('password'):
+        emit('error_message', {'message': 'Incorrect room password.'})
+        return
+
     if request.sid in room.get('players', []) or request.sid in room.get('spectators', []):
         return
 
+    username = session.get('username') or 'Guest'
     room.setdefault('spectators', []).append(request.sid)
+    room.setdefault('spectator_names', {})[request.sid] = username
     room['last_activity'] = time.time()
     join_room(room_code)
 
     emit('spectate_joined', {
         'room_code': room_code,
-        'fen': room['board'].fen()
+        'fen': room['board'].fen(),
+        'room_name': room.get('room_name') or f'Room {room_code}'
     }, room=request.sid)
+    emit_room_state(room_code)
+
+
+@socketio.on('send_chat_message')
+def handle_send_chat_message(data):
+    room_code = (data or {}).get('room_code', '').upper()
+    message = (data or {}).get('message', '').strip()
+    if room_code not in rooms or not message:
+        return
+
+    room = rooms[room_code]
+    if request.sid not in room.get('players', []) and request.sid not in room.get('spectators', []):
+        return
+
+    username = session.get('username') or get_player_display_name(request.sid, room_code) or 'Guest'
+    msg = {
+        'room_code': room_code,
+        'username': username,
+        'message': message,
+        'timestamp': time.strftime('%H:%M:%S')
+    }
+    socketio.emit('chat_message', msg, room=room_code)
+
+
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    room_code = (data or {}).get('room_code', '').upper()
+    if room_code not in rooms:
+        return
+
+    room = rooms[room_code]
+    if request.sid in room.get('players', []):
+        room['players'].remove(request.sid)
+        room.get('player_colors', {}).pop(request.sid, None)
+        room.get('player_names', {}).pop(request.sid, None)
+
+    if request.sid in room.get('spectators', []):
+        room['spectators'].remove(request.sid)
+        room.get('spectator_names', {}).pop(request.sid, None)
+
+    leave_room(room_code, request.sid)
+    room['last_activity'] = time.time()
+
+    if not room['players'] and not room.get('spectators', []):
+        del rooms[room_code]
+        print(f"[ROOM] Room '{room_code}' removed after player left.")
+        socketio.emit('game_list_updated', get_public_game_list())
+        return
+
+    socketio.emit('player_left', {
+        'room_code': room_code,
+        'message': 'Opponent left the room.'
+    }, room=room_code)
+    socketio.emit('game_list_updated', get_public_game_list())
+
+
+@socketio.on('request_rematch')
+def handle_request_rematch(data):
+    room_code = (data or {}).get('room_code', '').upper()
+    if room_code not in rooms:
+        return
+
+    room = rooms[room_code]
+    if request.sid not in room.get('players', []):
+        emit('error_message', {'message': 'Only players can start a rematch.'}, room=request.sid)
+        return
+
+    room['board'] = chess.Board()
+    room['last_activity'] = time.time()
+    room['game_over'] = False
+    room['player_colors'] = {player_sid: ('white' if idx == 0 else 'black') for idx, player_sid in enumerate(room['players'])}
+
+    emit_room_state(room_code)
+    socketio.emit('rematch_started', {
+        'room_code': room_code,
+        'message': 'New match started! White to move.'
+    }, room=room_code)
 
 
 @socketio.on('make_move')
@@ -356,10 +532,13 @@ def handle_make_move(data):
     room['game_over'] = board.is_game_over()
 
     if board.is_game_over():
+        result_text = get_game_status_message(room_code)
+        winner = 'white' if board.turn == chess.BLACK else 'black'
+        append_match_record(room_code, winner, result_text)
         emit('game_over', {
             'room_code': room_code,
-            'message': get_game_status_message(room_code),
-            'winner': 'white' if board.turn == chess.BLACK else 'black'
+            'message': result_text,
+            'winner': winner
         }, room=room_code)
 
     emit('move_made', {'move': move_data, 'fen': board.fen()}, room=room_code, include_self=False)
