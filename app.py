@@ -55,6 +55,7 @@ def remove_socket_from_room(sid, room_code=None):
     room = rooms[room_code]
     if sid in room.get('players', []):
         room['players'].remove(sid)
+        room.get('player_colors', {}).pop(sid, None)
     if sid in room.get('spectators', []):
         room['spectators'].remove(sid)
 
@@ -190,11 +191,13 @@ def handle_create_room():
     rooms[room_code] = {
         'board': chess.Board(),
         'players': [request.sid],
+        'player_colors': {request.sid: 'white'},
         'spectators': [],
-        'last_activity': time.time()  # Initialize timestamp
+        'last_activity': time.time(),
+        'game_over': False
     }
     join_room(room_code)
-    
+
     emit('room_created', {'room_code': room_code, 'color': 'white'}, room=request.sid)
     socketio.emit('game_list_updated', get_public_game_list())
 
@@ -215,7 +218,8 @@ def handle_join_room(data):
         return
 
     room['players'].append(request.sid)
-    room['last_activity'] = time.time()  # Refresh activity timestamp
+    room['player_colors'][request.sid] = 'black'
+    room['last_activity'] = time.time()
     join_room(room_code)
 
     emit('player_joined', {'room_code': room_code, 'color': 'black'}, room=request.sid)
@@ -257,9 +261,16 @@ def handle_make_move(data):
         emit('error_message', {'message': 'Only active players can make moves.'}, room=request.sid)
         return
 
+    player_color = room.get('player_colors', {}).get(request.sid)
+    if player_color is None:
+        emit('error_message', {'message': 'Player color not assigned.'}, room=request.sid)
+        return
+
     board = room['board']
-    if data.get('fen'):
-        board.set_fen(data.get('fen'))
+    expected_turn = 'w' if player_color == 'white' else 'b'
+    if board.turn != expected_turn:
+        emit('error_message', {'message': "It's not your turn."}, room=request.sid)
+        return
 
     if not isinstance(move_data, dict):
         emit('error_message', {'message': 'Invalid move payload.'}, room=request.sid)
@@ -283,9 +294,9 @@ def handle_make_move(data):
         emit('error_message', {'message': 'Illegal move.'}, room=request.sid)
         return
 
-    room['last_activity'] = time.time()  # Reset inactivity timer on move
+    room['last_activity'] = time.time()
+    room['game_over'] = board.is_game_over()
 
-    # Broadcast move to all room members (players + spectators)
     emit('move_made', {'move': move_data, 'fen': board.fen()}, room=room_code, include_self=False)
 
 
