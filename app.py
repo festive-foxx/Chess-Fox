@@ -1,18 +1,65 @@
+import os
+import sqlite3
+import secrets
 import time
 import random
 import string
+from contextlib import contextmanager
 from flask import Flask, render_template, request, session, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from werkzeug.security import check_password_hash, generate_password_hash
 import chess
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'fox-chess-secret-key-123'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+DATABASE_PATH = os.environ.get(
+    'DATABASE_PATH',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chess_fox.sqlite3')
+)
 
 # In-memory data stores
 rooms = {}  # Format: { room_code: { 'board': chess.Board(), 'players': [], 'spectators': [], 'last_activity': timestamp } }
-users = {}  # Format: { username: { 'password': pw, 'wins': 0, 'losses': 0, 'draws': 0 } }
 recent_matches = []
+
+
+@contextmanager
+def database_connection():
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.row_factory = sqlite3.Row
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def initialize_database():
+    with database_connection() as connection:
+        connection.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                wins INTEGER NOT NULL DEFAULT 0,
+                losses INTEGER NOT NULL DEFAULT 0,
+                draws INTEGER NOT NULL DEFAULT 0
+            )
+        ''')
+
+
+def serialize_user(user):
+    return {
+        'username': user['username'],
+        'wins': user['wins'],
+        'losses': user['losses'],
+        'draws': user['draws']
+    }
+
+
+initialize_database()
 
 # -------------------------------------------------------------
 # CONFIGURATION VARIABLES
@@ -236,14 +283,25 @@ def register():
     username = data.get('username')
     password = data.get('password')
 
-    if not username or not password:
+    if not isinstance(username, str) or not username.strip() or not isinstance(password, str) or not password:
         return jsonify({'message': 'Username and password required.'}), 400
-    if username in users:
+
+    username = username.strip()
+    try:
+        with database_connection() as connection:
+            connection.execute(
+                'INSERT INTO users (username, password_hash) VALUES (?, ?)',
+                (username, generate_password_hash(password))
+            )
+            user = connection.execute(
+                'SELECT username, wins, losses, draws FROM users WHERE username = ?',
+                (username,)
+            ).fetchone()
+    except sqlite3.IntegrityError:
         return jsonify({'message': 'User already exists.'}), 400
 
-    users[username] = {'password': password, 'wins': 0, 'losses': 0, 'draws': 0}
     session['username'] = username
-    return jsonify({'message': 'Registered successfully!', 'user': {'username': username, **users[username]}})
+    return jsonify({'message': 'Registered successfully!', 'user': serialize_user(user)})
 
 
 @app.route('/api/login', methods=['POST'])
@@ -252,9 +310,18 @@ def login():
     username = data.get('username')
     password = data.get('password')
 
-    if username in users and users[username]['password'] == password:
+    if isinstance(username, str) and isinstance(password, str):
+        username = username.strip()
+        with database_connection() as connection:
+            user = connection.execute(
+                'SELECT * FROM users WHERE username = ?', (username,)
+            ).fetchone()
+    else:
+        user = None
+
+    if user and check_password_hash(user['password_hash'], password):
         session['username'] = username
-        return jsonify({'message': 'Login successful!', 'user': {'username': username, **users[username]}})
+        return jsonify({'message': 'Login successful!', 'user': serialize_user(user)})
     
     return jsonify({'message': 'Invalid credentials.'}), 401
 
@@ -268,26 +335,41 @@ def logout():
 @app.route('/api/user_info', methods=['GET'])
 def user_info():
     username = session.get('username')
-    if username and username in users:
-        return jsonify({'logged_in': True, 'user': {'username': username, **users[username]}})
+    if username:
+        with database_connection() as connection:
+            user = connection.execute(
+                'SELECT username, wins, losses, draws FROM users WHERE username = ?',
+                (username,)
+            ).fetchone()
+        if user:
+            return jsonify({'logged_in': True, 'user': serialize_user(user)})
     return jsonify({'logged_in': False})
 
 
 @app.route('/api/record_result', methods=['POST'])
 def record_result():
     username = session.get('username')
-    if not username or username not in users:
+    if not username:
         return jsonify({'message': 'Not logged in.'}), 401
 
     result = (request.get_json() or {}).get('result')
-    if result == 'win':
-        users[username]['wins'] += 1
-    elif result == 'loss':
-        users[username]['losses'] += 1
-    elif result == 'draw':
-        users[username]['draws'] += 1
+    result_column = {'win': 'wins', 'loss': 'losses', 'draw': 'draws'}.get(result)
+    if not result_column:
+        return jsonify({'message': 'Invalid result.'}), 400
 
-    return jsonify({'message': 'Result recorded.', 'user': {'username': username, **users[username]}})
+    with database_connection() as connection:
+        cursor = connection.execute(
+            f'UPDATE users SET {result_column} = {result_column} + 1 WHERE username = ?',
+            (username,)
+        )
+        if cursor.rowcount == 0:
+            return jsonify({'message': 'Not logged in.'}), 401
+        user = connection.execute(
+            'SELECT username, wins, losses, draws FROM users WHERE username = ?',
+            (username,)
+        ).fetchone()
+
+    return jsonify({'message': 'Result recorded.', 'user': serialize_user(user)})
 
 
 # -------------------------------------------------------------
@@ -416,8 +498,6 @@ def handle_send_chat_message(data):
         'timestamp': time.strftime('%H:%M:%S')
     }
     socketio.emit('chat_message', msg, room=room_code)
-
-
 @socketio.on('leave_room')
 def handle_leave_room(data):
     room_code = (data or {}).get('room_code', '').upper()
@@ -544,8 +624,6 @@ def handle_make_move(data):
     emit('move_made', {'move': move_data, 'fen': board.fen()}, room=room_code, include_self=False)
     emit_room_state(room_code)
 
-
-import os
 
 if __name__ == '__main__':
     # Render assigns a dynamic port via the PORT environment variable.
